@@ -80,14 +80,21 @@
         <div class="controls-card">
             <div class="search-row">
                 <input type="text" id="searchInput" onkeyup="renderTable()" placeholder="ค้นหา S/N, ลูกค้า, โหมด...">
+
                 <select id="clientFilter" onchange="renderTable()">
                     <option value="all">-- ลูกค้าทั้งหมด --</option>
+                </select>
+
+                <select id="modeFilter" onchange="renderTable()">
+                    <option value="all">-- โหมดทั้งหมด --</option>
+                    <option value="Milled rice">Milled rice</option>
+                    <option value="Paddy">Paddy</option>
                 </select>
             </div>
             <div style="margin-top: 15px; text-align: right;">
                 <button onclick="resetFilters()" id="reset-btn"
                     style="background: none; border: none; color: #e74c3c; font-size: 14px; cursor: pointer; font-weight: bold; padding: 5px;">
-                    <i class="fas fa-undo"></i> ล้างค่าการค้นหา
+                    <i class="fas fa-undo"></i> <span id="text-reset">ล้างค่าการค้นหา</span>
                 </button>
             </div>
         </div>

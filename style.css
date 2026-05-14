@@ -281,9 +281,29 @@ body {
 }
 
 .search-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 15px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap; /* ให้ขึ้นบรรทัดใหม่ได้ถ้าที่กั้นไม่พอ */
+}
+
+.search-row input {
+    flex: 2;
+    min-width: 200px; /* ช่องค้นหาใหญ่หน่อย */
+}
+
+.search-row select {
+    flex: 1;
+    min-width: 140px; /* ช่อง Dropdown ขนาดเท่าๆ กัน */
+}
+
+@media (max-width: 768px) {
+    .search-row {
+        flex-direction: column; /* มือถือให้เรียงแถวตอนลึก */
+    }
+    .search-row input, 
+    .search-row select {
+        width: 100%; /* เต็มจอในมือถือ */
+    }
 }
 
 input,

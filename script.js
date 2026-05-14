@@ -149,15 +149,24 @@ function renderTable() {
     window.renderTimer = setTimeout(() => {
         const search = document.getElementById('searchInput').value.toLowerCase().trim();
         const client = document.getElementById('clientFilter').value;
+        const mode = document.getElementById('modeFilter').value;
         const body = document.getElementById('tableBody');
         const labels = i18n[currentLang].cols;
 
         // กรองข้อมูล (Filter)
         const filtered = machines.filter(m => {
             const isNotSorter = String(m["Type"] || "").toLowerCase() !== 'sorter';
+
+            // กรองด้วย Search
             const matchSearch = !search || Object.values(m).some(v => String(v).toLowerCase().includes(search));
+
+            // กรองด้วย Client
             const matchClient = (client === 'all' || m["Client name"] === client);
-            return isNotSorter && matchSearch && matchClient;
+
+            // กรองด้วย Mode (Milled rice / Paddy)
+            const matchMode = (mode === 'all' || m["Mode"] === mode);
+
+            return isNotSorter && matchSearch && matchClient && matchMode;
         });
 
         // แสดงข้อความเมื่อไม่พบข้อมูล
@@ -254,6 +263,7 @@ function quickFilter(term) {
 function resetFilters() {
     document.getElementById('searchInput').value = '';
     document.getElementById('clientFilter').value = 'all';
+    document.getElementById('modeFilter').value = 'all';
     renderTable();
     Toast.fire({ icon: 'success', title: currentLang === 'th' ? 'ล้างตัวกรองแล้ว' : 'Filters cleared' });
 }
