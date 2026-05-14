@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Panolyzer Management by C2TECH</title>
+
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;700;800&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/@sweetalert2/theme-minimal/minimal.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+    <div id="app-loader">
+        <div class="loader-container">
+            <div class="logo-wrapper">
+                <img src="/img/logo.png" alt="Panolyzer Logo" class="chibi-logo">
+                <div class="loader-ring"></div>
+            </div>
+            <div class="loader-text" id="loader-msg">Panolyzer Management</div>
+        </div>
+    </div>
+    <div class="mobile-top-bar">
+        <button class="menu-btn" onclick="toggleSidebar()"><i class="fas fa-bars"></i> <span
+                id="m-menu-text">เมนู</span></button>
+        <div style="text-align: right; display: flex; align-items: center; gap: 8px;">
+            <div class="mobile-lang">
+                <button class="mobile-lang-btn" id="m-btn-th" onclick="setLanguage('th')">TH</button>
+                <button class="mobile-lang-btn" id="m-btn-en" onclick="setLanguage('en')">EN</button>
+            </div>
+            <div>
+                <span
+                    style="font-weight: 900; color: var(--c2-medium); font-size: 14px; display: block; line-height: 1;">Panolyzer</span>
+                <div style="font-size: 9px; color: #999; font-weight: bold;">C2TECH v0.3.5</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+
+    <div class="sidebar" id="sidebar">
+        <div class="brand-container">
+            <h1 class="brand-text">Panolyzer<br>Management</h1>
+            <div class="brand-sub"></div>
+            <div style="font-size: 12px; color: #aaa; font-weight: bold; letter-spacing: 1px;">BY C2TECH</div>
+        </div>
+
+        <div class="lang-container">
+            <button class="lang-btn" id="btn-th" onclick="setLanguage('th')">TH</button>
+            <button class="lang-btn" id="btn-en" onclick="setLanguage('en')">EN</button>
+        </div>
+
+        <div class="nav-label" id="nav-label-ov"><i class="fas fa-chart-pie"></i> ภาพรวมระบบ</div>
+        <div class="stats-grid" id="statsBox"></div>
+
+        <div id="updateTime"
+            style="font-size: 11px; color: #999; text-align: center; margin-top: 30px; font-weight: bold; border-top: 1px dashed #eee; padding-top: 20px;">
+        </div>
+
+        <div style="margin-top: auto; padding-top: 20px; text-align: center;">
+            <button onclick="fetchData()" id="refresh-btn"
+                style="width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--c2-light); background: var(--c2-light); color: var(--c2-dark); font-weight: bold; cursor: pointer;">
+                <i class="fas fa-sync-alt"></i> รีเฟรชข้อมูล
+            </button>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+            <h2 id="main-title" style="margin:0; color: var(--c2-dark); font-weight: 800; font-size: 24px;">
+                เครื่องทั้งหมด</h2>
+            <div id="totalCounter"
+                style="font-size: 14px; font-weight: bold; color: var(--c2-primary); background: var(--c2-light); padding: 5px 12px; border-radius: 20px;">
+            </div>
+        </div>
+
+        <div class="controls-card">
+            <div class="search-row">
+                <input type="text" id="searchInput" onkeyup="renderTable()" placeholder="ค้นหา S/N, ลูกค้า, โหมด...">
+                <select id="clientFilter" onchange="renderTable()">
+                    <option value="all">-- ลูกค้าทั้งหมด --</option>
+                </select>
+            </div>
+            <div style="margin-top: 15px; text-align: right;">
+                <button onclick="resetFilters()" id="reset-btn"
+                    style="background: none; border: none; color: #e74c3c; font-size: 14px; cursor: pointer; font-weight: bold; padding: 5px;">
+                    <i class="fas fa-undo"></i> ล้างค่าการค้นหา
+                </button>
+            </div>
+        </div>
+
+        <div class="table-container">
+            <div class="table-scroll">
+                <table>
+                    <thead id="tableHead">
+                        <tr></tr>
+                    </thead>
+                    <tbody id="tableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+
+</html>
