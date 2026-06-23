@@ -1,10 +1,11 @@
-const scriptURL = "https://script.google.com/macros/s/AKfycbyoDpjNfMwS0tp8A78uwe8QmuMaJVLhhR7dKdILP0wczmRu-KXX-CsnxSwGE4RwAg2J/exec";
+const scriptURL = "https://script.google.com/macros/s/AKfycbxGVn35ldvDp8DoR5qMQHt2-24OtZ2r4tk0G621QNTX23SjPmwEfZoqPC8jDORmUDg/exec";
 const CACHE_KEY = "c2tech_machines_data_v2";
 let machines = [];
+let rejectedMachines = [];
+let currentView = 'all';
 let currentLang = localStorage.getItem('c2_lang') || 'th';
 let searchTimeout;
 
-// ตั้งค่าพื้นฐานสำหรับ Toast
 const Toast = Swal.mixin({
     toast: true,
     position: 'top-end',
@@ -20,28 +21,30 @@ const Toast = Swal.mixin({
 const i18n = {
     th: {
         menu: "เมนู", overview: "ภาพรวมระบบ", refresh: "รีเฟรชข้อมูล", mainTitle: "เครื่องทั้งหมด",
+        rejectedTitle: "ประวัติการทดลองแล้วไม่ซื้อ",
         search: "ค้นหา S/N, ลูกค้า, โหมด...", allClients: "-- ลูกค้าทั้งหมด --", reset: "ล้างค่าการค้นหา",
         total: "รวม", unit: "เครื่อง", updated: "อัปเดตเมื่อ:", days: "วัน",
         cols: ["S/N Analyzer", "S/N Edge", "ลูกค้า", "สถานที่", "Mode", "ประเภท", "สถานะ", "ส่งมอบ", "ระยะเวลา"],
+        rejectedCols: ["ชื่อโรงสี/ลูกค้า", "S/N Analyzer", "จังหวัด", "วันเริ่มทดลอง", "วันสิ้นสุดทดลอง", "รวมระยะเวลา"],
         stats: ["Lab ทั้งหมด", "Real-time ทั้งหมด", "ในคลัง (Stock)", "ส่งซ่อม (Broken)", "เครื่องเทส (TEST)"],
         msg: { loading: "กำลังซิงค์ข้อมูล", syncSuccess: "ข้อมูลล่าสุดแล้ว", langChange: "เปลี่ยนเป็นภาษาไทย" },
         clients: {}
     },
     en: {
         menu: "Menu", overview: "System Overview", refresh: "Refresh Data", mainTitle: "All Machines",
+        rejectedTitle: "Trial - Not Bought History",
         search: "Search S/N, Client, Mode...", allClients: "-- All Clients --", reset: "Clear Filters",
         total: "Total", unit: "units", updated: "Updated at:", days: "days",
         cols: ["S/N Analyzer", "S/N Edge", "Client", "Location", "Mode", "Type", "Status", "Delivery", "Period"],
+        rejectedCols: ["Customer/Client", "S/N Analyzer", "Province", "Start Date", "End Date", "Total Period"],
         stats: ["Total Lab", "Total Real-time", "In Stock", "Broken/Repair", "Test Units"],
         msg: { loading: "Syncing Data", syncSuccess: "Data Updated", langChange: "Switched to English" },
-        clients: {
-            "ตัวอย่าง": "Tua-Yang"
-        }
+        clients: { "ตัวอย่าง": "Tua-Yang" }
     }
 };
 
 window.onload = () => {
-    setLanguage(currentLang, true); // true = ไม่แสดง Toast ตอนเปิดเว็บครั้งแรก
+    setLanguage(currentLang, true);
     loadFromCache();
     fetchData();
 };
@@ -50,7 +53,6 @@ function setLanguage(lang, silent = false) {
     currentLang = lang;
     localStorage.setItem('c2_lang', lang);
 
-    // UI Updates
     document.querySelectorAll('.lang-btn, .mobile-lang-btn').forEach(b => b.classList.remove('active'));
     if (document.getElementById(`btn-${lang}`)) document.getElementById(`btn-${lang}`).classList.add('active');
     if (document.getElementById(`m-btn-${lang}`)) document.getElementById(`m-btn-${lang}`).classList.add('active');
@@ -58,18 +60,19 @@ function setLanguage(lang, silent = false) {
     document.getElementById('m-menu-text').innerText = i18n[lang].menu;
     document.getElementById('nav-label-ov').innerHTML = `<i class="fas fa-chart-pie"></i> ${i18n[lang].overview}`;
     document.getElementById('refresh-btn').innerHTML = `<i class="fas fa-sync-alt"></i> ${i18n[lang].refresh}`;
-    document.getElementById('main-title').innerText = i18n[lang].mainTitle;
+
+    document.getElementById('main-title').innerText = currentView === 'all' ? i18n[lang].mainTitle : i18n[lang].rejectedTitle;
     document.getElementById('searchInput').placeholder = i18n[lang].search;
     document.getElementById('reset-btn').innerHTML = `<i class="fas fa-undo"></i> ${i18n[lang].reset}`;
-    document.querySelector('#tableHead tr').innerHTML = i18n[lang].cols.map(c => `<th>${c}</th>`).join('');
+
+    const activeCols = currentView === 'all' ? i18n[lang].cols : i18n[lang].rejectedCols;
+    document.querySelector('#tableHead tr').innerHTML = activeCols.map(c => `<th>${c}</th>`).join('');
 
     updateClientDropdown();
     updateStats();
     renderTable();
 
-    if (!silent) {
-        Toast.fire({ icon: 'info', title: i18n[lang].msg.langChange });
-    }
+    if (!silent) Toast.fire({ icon: 'info', title: i18n[lang].msg.langChange });
 }
 
 function translateClient(name) {
@@ -98,14 +101,19 @@ function loadFromCache() {
     const cached = localStorage.getItem(CACHE_KEY);
     const lastSync = localStorage.getItem("last_sync_time");
     if (cached) {
-        machines = JSON.parse(cached);
+        const parsedData = JSON.parse(cached);
+        if (Array.isArray(parsedData)) {
+            machines = parsedData;
+        } else {
+            machines = parsedData.machines || [];
+            rejectedMachines = parsedData.rejected || [];
+        }
         if (lastSync) document.getElementById('updateTime').innerText = `${i18n[currentLang].updated} ${lastSync}`;
         updateClientDropdown(); updateStats(); renderTable();
     }
 }
 
 async function fetchData() {
-    // แสดงหน้าจอโหลด (ถ้ามีการเรียกใหม่)
     const loader = document.getElementById('app-loader');
     loader.classList.remove('loader-hidden');
     document.getElementById('loader-msg').innerText = i18n[currentLang].msg.loading;
@@ -113,101 +121,169 @@ async function fetchData() {
 
     try {
         const [response] = await Promise.all([
-            fetch(scriptURL),
+            fetch(scriptURL + "?v=" + new Date().getTime(), { cache: "no-store", redirect: "follow" }),
             minimumDisplayTime
         ]);
+        
         const data = await response.json();
-        if (data && data.length > 0) {
-            machines = data;
+        console.log("Raw data from server:", data); // ดูโครงสร้างข้อมูลจริงใน Console (F12)
+
+        if (data) {
+            // --- จุดที่แก้ไข: ดักจับข้อมูลทั้งแบบเก่าและแบบใหม่ ---
+            if (Array.isArray(data)) {
+                // ถ้าเซิร์ฟเวอร์ยังส่งมาเป็นแบบเก่า (Array)
+                machines = data;
+                rejectedMachines = [];
+                console.warn("⚠️ ตรวจพบข้อมูลแบบเก่า: กรุณา Deploy Google Script เป็นเวอร์ชันใหม่");
+            } else {
+                // ถ้าเซิร์ฟเวอร์เป็นแบบใหม่แล้ว
+                machines = data.machines || []; 
+                rejectedMachines = data.rejected || [];
+            }
+            // ------------------------------------------
+
             const now = new Date().toLocaleString(currentLang === 'th' ? 'th-TH' : 'en-GB', { hour12: false, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-            localStorage.setItem(CACHE_KEY, JSON.stringify(machines));
+
+            localStorage.setItem(CACHE_KEY, JSON.stringify({ machines, rejected: rejectedMachines }));
             localStorage.setItem("last_sync_time", now);
+
             document.getElementById('updateTime').innerText = `${i18n[currentLang].updated} ${now}`;
-            updateClientDropdown(); updateStats(); renderTable();
+            updateClientDropdown(); 
+            updateStats(); 
+            renderTable();
             Swal.close();
             Toast.fire({ icon: 'success', title: i18n[currentLang].msg.syncSuccess });
         }
-        updateClientDropdown();
-        updateStats();
-        renderTable();
-
-        // ซ่อนหน้าจอโหลด
         loader.classList.add('loader-hidden');
-        Toast.fire({ icon: 'success', title: i18n[currentLang].msg.syncSuccess });
     }
     catch (e) {
-        loader.classList.add('loader-hidden'); // ซ่อนเพื่อแสดง Error
+        console.error("Fetch error details:", e);
+        loader.classList.add('loader-hidden');
         Swal.fire({ icon: 'error', title: 'Connection Error', text: 'ไม่สามารถเชื่อมต่อข้อมูลได้' });
     }
 }
 
-// [script.js] - ส่วนที่แนะนำให้ปรับปรุง
+function switchView(view) {
+    currentView = view;
+    document.getElementById('main-title').innerText = view === 'all' ? i18n[currentLang].mainTitle : i18n[currentLang].rejectedTitle;
+    document.getElementById('modeFilter').style.display = view === 'all' ? 'inline-block' : 'none';
+
+    // โชว์ปุ่ม Guide เฉพาะหน้า Rejected
+    document.getElementById('guideBtn').style.display = view === 'all' ? 'none' : 'inline-block';
+
+    const activeCols = view === 'all' ? i18n[currentLang].cols : i18n[currentLang].rejectedCols;
+    document.querySelector('#tableHead tr').innerHTML = activeCols.map(c => `<th>${c}</th>`).join('');
+
+    document.getElementById('searchInput').value = '';
+    document.getElementById('clientFilter').value = 'all';
+
+    renderTable();
+    if (window.innerWidth <= 992) toggleSidebar();
+}
 
 function renderTable() {
-    // ใช้เทคนิค Debounce เพื่อไม่ให้ Render บ่อยเกินไปขณะพิมพ์
     clearTimeout(window.renderTimer);
     window.renderTimer = setTimeout(() => {
         const search = document.getElementById('searchInput').value.toLowerCase().trim();
         const client = document.getElementById('clientFilter').value;
         const mode = document.getElementById('modeFilter').value;
         const body = document.getElementById('tableBody');
-        const labels = i18n[currentLang].cols;
+        const labels = currentView === 'all' ? i18n[currentLang].cols : i18n[currentLang].rejectedCols;
 
-        // กรองข้อมูล (Filter)
-        const filtered = machines.filter(m => {
-            const isNotSorter = String(m["Type"] || "").toLowerCase() !== 'sorter';
+        let sourceData = currentView === 'all' ? machines : rejectedMachines;
 
-            // กรองด้วย Search
-            const matchSearch = !search || Object.values(m).some(v => String(v).toLowerCase().includes(search));
-
-            // กรองด้วย Client
-            const matchClient = (client === 'all' || m["Client name"] === client);
-
-            // กรองด้วย Mode (Milled rice / Paddy)
-            const matchMode = (mode === 'all' || m["Mode"] === mode);
-
-            return isNotSorter && matchSearch && matchClient && matchMode;
-        });
-
-        // แสดงข้อความเมื่อไม่พบข้อมูล
-        if (filtered.length === 0) {
-            body.innerHTML = `<tr><td colspan="9" style="text-align:center; padding: 50px; color:#999;">No Data Found</td></tr>`;
+        if (!sourceData || sourceData.length === 0) {
+            body.innerHTML = `<tr><td colspan="${labels.length}" style="text-align:center; padding: 50px; color:#999;">ไม่พบข้อมูลในระบบ</td></tr>`;
             document.getElementById('totalCounter').innerText = `${i18n[currentLang].total} 0 ${i18n[currentLang].unit}`;
             return;
         }
 
-        // ใช้ DocumentFragment เพื่อ Performance ที่ดีขึ้น
+        // --- ระบบเรียงลำดับจำนวนวันจากมากไปน้อย ---
+        let sortedData = [...sourceData];
+        sortedData.sort((a, b) => {
+            // แก้ไข: ดักจับ NaN ด้วย || 0 ด้านนอก parseInt
+            let valA = parseInt(a["Period"] || a["Total Period"] || a["รวมทั้งหมด"]) || 0;
+            let valB = parseInt(b["Period"] || b["Total Period"] || b["รวมทั้งหมด"]) || 0;
+            return valB - valA;
+        });
+
+        // --- กรองข้อมูล ---
+        const filtered = sortedData.filter(m => {
+            if (currentView === 'all') {
+                const isNotSorter = String(m["Type"] || "").toLowerCase() !== 'sorter';
+                const matchSearch = !search || Object.values(m).some(v => String(v).toLowerCase().includes(search));
+                const matchClient = (client === 'all' || m["Client name"] === client);
+                const matchMode = (mode === 'all' || m["Mode"] === mode);
+                return isNotSorter && matchSearch && matchClient && matchMode;
+            } else {
+                const matchSearch = !search || Object.values(m).some(v => String(v).toLowerCase().includes(search));
+                const currentClientName = m["Client Name"] || m["Client name"] || m["ชื่อโรงสี/ลูกค้า"] || "";
+                const matchClient = (client === 'all' || currentClientName === client);
+                return matchSearch && matchClient;
+            }
+        });
+
+        if (filtered.length === 0) {
+            body.innerHTML = `<tr><td colspan="${labels.length}" style="text-align:center; padding: 50px; color:#999;">ไม่พบข้อมูลที่ค้นหา</td></tr>`;
+            document.getElementById('totalCounter').innerText = `${i18n[currentLang].total} 0 ${i18n[currentLang].unit}`;
+            return;
+        }
+
         const fragment = document.createDocumentFragment();
+
+        // แก้ไข: ย้ายฟังก์ชัน findKey ออกมานอก Loop เพื่อประหยัด Memory
+        const findKey = (obj, keys) => {
+            const foundKey = keys.find(k => obj.hasOwnProperty(k));
+            return foundKey ? obj[foundKey] : "-";
+        };
 
         filtered.forEach(m => {
             const tr = document.createElement('tr');
-            const s = (m["Status"] || "Stock").trim();
-            const bClass = s.toLowerCase().includes('complete') ? "bg-complete" :
-                s.toLowerCase().includes('broken') ? "bg-broken" :
-                    s.toLowerCase().includes('test') ? "bg-test" : "bg-stock";
-            const p = parseInt(m["Period"]) || 0;
 
-            // ปรับปรุงการแสดงผล Period ให้มีสีเตือนเมื่อเกิน 1 ปี
-            const periodStyle = p > 365 ? 'color:#e67e22; font-weight:bold;' : '';
+            if (currentView === 'all') {
+                const s = (m["Status"] || "Stock").trim();
+                const bClass = s.toLowerCase().includes('complete') ? "bg-complete" :
+                               s.toLowerCase().includes('broken') ? "bg-broken" :
+                               s.toLowerCase().includes('test') ? "bg-test" : "bg-stock";
+                const p = parseInt(m["Period"]) || 0;
+                const periodStyle = p > 365 ? 'color:#e67e22; font-weight:bold;' : '';
 
-            tr.innerHTML = `
-                <td data-label="${labels[0]}"><div class="val-text">${m["S/N Analyzer"] || "-"}</div></td>
-                <td data-label="${labels[1]}"><div class="val-text">${m["S/N Edge server"] || "-"}</div></td>
-                <td data-label="${labels[2]}"><div class="val-text">${translateClient(m["Client name"])}</div></td>
-                <td data-label="${labels[3]}"><div class="val-text">${m["Location"] || "-"}</div></td>
-                <td data-label="${labels[4]}"><div class="val-text"><span class="mode-tag">${m["Mode"] || "-"}</span></div></td>
-                <td data-label="${labels[5]}"><div class="val-text">${m["Type"] || "-"}</div></td>
-                <td data-label="${labels[6]}"><div class="val-text"><span class="badge ${bClass}">${s.toUpperCase()}</span></div></td>
-                <td data-label="${labels[7]}"><div class="val-text">${formatDate(m["Delivery date"])}</div></td>
-                <td data-label="${labels[8]}"><div class="val-text" style="${periodStyle}">${p} ${i18n[currentLang].days}</div></td>
-            `;
+                tr.innerHTML = `
+                    <td data-label="${labels[0]}"><div class="val-text">${m["S/N Analyzer"] || "-"}</div></td>
+                    <td data-label="${labels[1]}"><div class="val-text">${m["S/N Edge server"] || "-"}</div></td>
+                    <td data-label="${labels[2]}"><div class="val-text">${translateClient(m["Client name"])}</div></td>
+                    <td data-label="${labels[3]}"><div class="val-text">${m["Location"] || "-"}</div></td>
+                    <td data-label="${labels[4]}"><div class="val-text"><span class="mode-tag">${m["Mode"] || "-"}</span></div></td>
+                    <td data-label="${labels[5]}"><div class="val-text">${m["Type"] || "-"}</div></td>
+                    <td data-label="${labels[6]}"><div class="val-text"><span class="badge ${bClass}">${s.toUpperCase()}</span></div></td>
+                    <td data-label="${labels[7]}"><div class="val-text">${formatDate(m["Delivery date"])}</div></td>
+                    <td data-label="${labels[8]}"><div class="val-text" style="${periodStyle}">${p} ${i18n[currentLang].days}</div></td>
+                `;
+            } else {
+                // เรียกใช้ findKey โดยส่ง object m เข้าไปด้วย
+                const clientName = findKey(m, ["Client Name", "Client name", "ชื่อโรงสี/ลูกค้า"]);
+                const snVal = findKey(m, ["SN Analyzer", "S/N Analyzer", "S/N"]);
+                const locVal = findKey(m, ["Location", "location", "จังหวัด"]);
+                const startDate = findKey(m, ["Start Date", "Start date", "วันเริ่มทดลอง"]);
+                const endDate = findKey(m, ["End Date", "End date", "วันสิ้นสุดทดลอง"]);
+                const totalPeriod = findKey(m, ["Total Period", "Total period", "รวมทั้งหมด", "รวมทั้งหมด(วัน)", "Period"]);
+
+                tr.innerHTML = `
+                    <td data-label="${labels[0]}"><div class="val-text" style="font-weight:bold; color:#1b4332;">${translateClient(clientName)}</div></td>
+                    <td data-label="${labels[1]}"><div class="val-text">${snVal}</div></td>
+                    <td data-label="${labels[2]}"><div class="val-text">${locVal}</div></td>
+                    <td data-label="${labels[3]}"><div class="val-text">${formatDate(startDate)}</div></td>
+                    <td data-label="${labels[4]}"><div class="val-text">${formatDate(endDate)}</div></td>
+                    <td data-label="${labels[5]}"><div class="val-text" style="color:#e74c3c; font-weight:bold;">${totalPeriod} ${i18n[currentLang].days}</div></td>
+                `;
+            }
             fragment.appendChild(tr);
         });
 
         body.innerHTML = '';
         body.appendChild(fragment);
         document.getElementById('totalCounter').innerText = `${i18n[currentLang].total} ${filtered.length} ${i18n[currentLang].unit}`;
-    }, 150); // ลดเวลาหน่วงลงเหลือ 150ms เพื่อความรู้สึกที่ไวขึ้น
+    }, 150);
 }
 
 function updateStats() {
@@ -229,35 +305,36 @@ function updateStats() {
 
     const sl = i18n[currentLang].stats;
     document.getElementById('statsBox').innerHTML = `
-            <div class="stat-card card-lab" onclick="quickFilter('Lab')"><span class="stat-label">${sl[0]}</span><span class="stat-val">${st.L}</span></div>
-            <div class="stat-card card-real" onclick="quickFilter('Real-time')"><span class="stat-label">${sl[1]}</span><span class="stat-val">${st.R}</span></div>
-            <div class="stat-card card-stock" onclick="quickFilter('Stock')">
+            <div class="stat-card card-lab" onclick="switchView('all'); quickFilter('Lab')"><span class="stat-label">${sl[0]}</span><span class="stat-val">${st.L}</span></div>
+            <div class="stat-card card-real" onclick="switchView('all'); quickFilter('Real-time')"><span class="stat-label">${sl[1]}</span><span class="stat-val">${st.R}</span></div>
+            <div class="stat-card card-stock" onclick="switchView('all'); quickFilter('Stock')">
                 <span class="stat-label">${sl[2]}</span>
                 <div style="text-align:right"><span class="stat-val">${st.S.n}</span><span class="stat-detail">L: ${st.S.l} | R: ${st.S.r}</span></div>
             </div>
-            <div class="stat-card card-broken" onclick="quickFilter('Broken')">
+            <div class="stat-card card-broken" onclick="switchView('all'); quickFilter('Broken')">
                 <span class="stat-label">${sl[3]}</span>
                 <div style="text-align:right"><span class="stat-val">${st.B.n}</span><span class="stat-detail">L: ${st.B.l} | R: ${st.B.r}</span></div>
             </div>
-            <div class="stat-card card-test" onclick="quickFilter('TEST')">
+            <div class="stat-card card-test" onclick="switchView('all'); quickFilter('TEST')">
                 <span class="stat-label">${sl[4]}</span>
                 <div style="text-align:right"><span class="stat-val">${st.T.n}</span><span class="stat-detail">L: ${st.T.l} | R: ${st.T.r}</span></div>
             </div>
         `;
 }
 
-function quickFilter(term) {
-    const input = document.getElementById('searchInput');
-    if (input.value === term) {
-        input.value = '';
-        Toast.fire({ icon: 'info', title: currentLang === 'th' ? 'แสดงเครื่องทั้งหมด' : 'Showing all units' });
-    } else {
-        input.value = term;
-        document.getElementById('clientFilter').value = 'all';
-        Toast.fire({ icon: 'success', title: `${currentLang === 'th' ? 'กรอง' : 'Filter'}: ${term}` });
-    }
-    renderTable();
-    if (window.innerWidth <= 992) toggleSidebar();
+function updateClientDropdown() {
+    const activeMachines = machines.filter(m => String(m["Type"] || "").toLowerCase() !== 'sorter');
+    const clients1 = activeMachines.map(m => m["Client name"]);
+    const clients2 = rejectedMachines.map(m => m["Client Name"] || m["Client name"] || m["ชื่อโรงสี/ลูกค้า"]);
+
+    const cls = [...new Set([...clients1, ...clients2])].filter(Boolean).sort();
+    const sel = document.getElementById('clientFilter');
+    const currentVal = sel.value;
+    sel.innerHTML = `<option value="all">${i18n[currentLang].allClients}</option>`;
+    cls.forEach(c => {
+        const isSelected = c === currentVal ? 'selected' : '';
+        sel.innerHTML += `<option value="${c}" ${isSelected}>${translateClient(c)}</option>`;
+    });
 }
 
 function resetFilters() {
@@ -265,17 +342,32 @@ function resetFilters() {
     document.getElementById('clientFilter').value = 'all';
     document.getElementById('modeFilter').value = 'all';
     renderTable();
-    Toast.fire({ icon: 'success', title: currentLang === 'th' ? 'ล้างตัวกรองแล้ว' : 'Filters cleared' });
 }
 
-function updateClientDropdown() {
-    const activeMachines = machines.filter(m => String(m["Type"] || "").toLowerCase() !== 'sorter');
-    const cls = [...new Set(activeMachines.map(m => m["Client name"]))].filter(Boolean).sort();
-    const sel = document.getElementById('clientFilter');
-    const currentVal = sel.value;
-    sel.innerHTML = `<option value="all">${i18n[currentLang].allClients}</option>`;
-    cls.forEach(c => {
-        const isSelected = c === currentVal ? 'selected' : '';
-        sel.innerHTML += `<option value="${c}" ${isSelected}>${translateClient(c)}</option>`;
+function quickFilter(status) {
+    document.getElementById('searchInput').value = status;
+    document.getElementById('clientFilter').value = 'all';
+    document.getElementById('modeFilter').value = 'all';
+    renderTable();
+}
+
+// ฟังก์ชันแสดงคำแนะนำ
+function showGuide() {
+    Swal.fire({
+        title: 'วิธีเพิ่มข้อมูลใหม่',
+        html: `
+            <div style="text-align: left; font-size: 14px;">
+                <p>ข้อมูลในหน้านี้ดึงมาจาก Google Sheets โดยตรง:</p>
+                <ol>
+                    <li>เปิดไฟล์ Google Sheets <b>Panolyzer Management</b></li>
+                    <li>ไปที่แท็บแผ่นงาน <b>Rejected Trials</b></li>
+                    <li>กรอกข้อมูลลูกค้าลงในบรรทัดใหม่</li>
+                    <li>กลับมาที่หน้าเว็บนี้ แล้วกดปุ่ม <b>"รีเฟรชข้อมูล"</b></li>
+                </ol>
+            </div>
+        `,
+        icon: 'info',
+        confirmButtonText: 'เข้าใจแล้ว',
+        confirmButtonColor: '#27ae60'
     });
 }

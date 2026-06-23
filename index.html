@@ -53,6 +53,17 @@
             <button class="lang-btn" id="btn-en" onclick="setLanguage('en')">EN</button>
         </div>
 
+        <ul class="sidebar-menu" style="list-style:none; padding:0; margin: 20px 0;">
+            <li onclick="switchView('all')"
+                style="cursor:pointer; padding:12px; border-radius:8px; margin-bottom:8px; background:#f4f6f8; font-weight:bold; color: #333;">
+                <i class="fas fa-server"></i> <span data-i18n="all">เครื่องทั้งหมด</span>
+            </li>
+            <li onclick="switchView('rejected')"
+                style="cursor:pointer; padding:12px; border-radius:8px; margin-bottom:8px; background:#fff5f5; color:#c0392b; font-weight:bold;">
+                <i class="fas fa-history"></i> <span data-i18n="rejected">ประวัติทดลองแล้วไม่ซื้อ</span>
+            </li>
+        </ul>
+
         <div class="nav-label" id="nav-label-ov"><i class="fas fa-chart-pie"></i> ภาพรวมระบบ</div>
         <div class="stats-grid" id="statsBox"></div>
 
@@ -80,11 +91,9 @@
         <div class="controls-card">
             <div class="search-row">
                 <input type="text" id="searchInput" onkeyup="renderTable()" placeholder="ค้นหา S/N, ลูกค้า, โหมด...">
-
                 <select id="clientFilter" onchange="renderTable()">
                     <option value="all">-- ลูกค้าทั้งหมด --</option>
                 </select>
-
                 <select id="modeFilter" onchange="renderTable()">
                     <option value="all">-- Select Mode --</option>
                     <option value="Milled rice">Milled rice</option>
@@ -95,6 +104,10 @@
                 <button onclick="resetFilters()" id="reset-btn"
                     style="background: none; border: none; color: #e74c3c; font-size: 14px; cursor: pointer; font-weight: bold; padding: 5px;">
                     <i class="fas fa-undo"></i> <span id="text-reset">ล้างค่าการค้นหา</span>
+                </button>
+                <button id="guideBtn" onclick="showGuide()"
+                    style="display:none; margin-left: 15px; background: #27ae60; color: white; border: none; padding: 8px 15px; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <i class="fas fa-info-circle"></i> วิธีเพิ่มข้อมูล
                 </button>
             </div>
         </div>
@@ -110,6 +123,7 @@
             </div>
         </div>
     </div>
+
     <script src="script.js"></script>
 </body>
 
