@@ -4,12 +4,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#1b4332">
     <title>Panolyzer Management by C2TECH</title>
 
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://cdn.jsdelivr.net">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;700;800&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/@sweetalert2/theme-minimal/minimal.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     <link rel="stylesheet" href="style.css" />
 </head>
 
@@ -27,6 +32,8 @@
         <button class="menu-btn" onclick="toggleSidebar()"><i class="fas fa-bars"></i> <span
                 id="m-menu-text">เมนู</span></button>
         <div style="text-align: right; display: flex; align-items: center; gap: 8px;">
+            <i class="fas fa-lock admin-login-btn" onclick="adminAuth()" title="Admin Login"
+                style="font-size: 18px; color: #999; cursor: pointer; padding: 6px;"></i>
             <div class="mobile-lang">
                 <button class="mobile-lang-btn" id="m-btn-th" onclick="setLanguage('th')">TH</button>
                 <button class="mobile-lang-btn" id="m-btn-en" onclick="setLanguage('en')">EN</button>
@@ -60,7 +67,11 @@
             </li>
             <li onclick="switchView('rejected')"
                 style="cursor:pointer; padding:12px; border-radius:8px; margin-bottom:8px; background:#fff5f5; color:#c0392b; font-weight:bold;">
-                <i class="fas fa-history"></i> <span data-i18n="rejected">ประวัติทดลองแล้วไม่ซื้อ</span>
+                <i class="fas fa-history"></i> <span data-i18n="rejected">ประวัติทดลอง</span>
+            </li>
+            <li onclick="showDashboard()"
+                style="cursor:pointer; padding:12px; border-radius:8px; margin-bottom:8px; background:#eef6ff; color:#1565c0; font-weight:bold;">
+                <i class="fas fa-chart-pie"></i> <span>Dashboard</span>
             </li>
         </ul>
 
@@ -72,6 +83,10 @@
         </div>
 
         <div style="margin-top: auto; padding-top: 20px; text-align: center;">
+            <button onclick="adminAuth()"
+                style="width: 100%; padding: 10px; border-radius: 10px; border: 1px solid #eee; background: #fafafa; color: #666; font-weight: bold; cursor: pointer; margin-bottom: 8px; font-size: 13px;">
+                <i class="fas fa-lock admin-login-btn"></i> <span id="adminBtnText">Admin Login</span>
+            </button>
             <button onclick="fetchData()" id="refresh-btn"
                 style="width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--c2-light); background: var(--c2-light); color: var(--c2-dark); font-weight: bold; cursor: pointer;">
                 <i class="fas fa-sync-alt"></i> รีเฟรชข้อมูล
@@ -99,15 +114,12 @@
                     <option value="Milled rice">Milled rice</option>
                     <option value="Paddy">Paddy</option>
                 </select>
+                <select id="resultFilter" onchange="renderTable()" style="display:none;"></select>
             </div>
             <div style="margin-top: 15px; text-align: right;">
                 <button onclick="resetFilters()" id="reset-btn"
                     style="background: none; border: none; color: #e74c3c; font-size: 14px; cursor: pointer; font-weight: bold; padding: 5px;">
                     <i class="fas fa-undo"></i> <span id="text-reset">ล้างค่าการค้นหา</span>
-                </button>
-                <button id="guideBtn" onclick="showGuide()"
-                    style="display:none; margin-left: 15px; background: #27ae60; color: white; border: none; padding: 8px 15px; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                    <i class="fas fa-info-circle"></i> วิธีเพิ่มข้อมูล
                 </button>
             </div>
         </div>
