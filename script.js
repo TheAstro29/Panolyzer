@@ -27,7 +27,7 @@ async function adminAuth() {
         input: 'password',
         inputLabel: 'กรุณาใส่รหัสผ่านเพื่อเพิ่มข้อมูล',
         inputPlaceholder: 'Password',
-        confirmButtonColor: '#1b4332',
+        confirmButtonColor: '#2C4C3A',
         showCancelButton: true,
         cancelButtonText: 'ยกเลิก'
     });
@@ -272,7 +272,11 @@ function switchView(view) {
     document.getElementById('modeFilter').value = 'all';
 
     renderTable();
-    if (window.innerWidth <= 992) toggleSidebar();
+    // เดิม toggle แบบไม่มีเงื่อนไข (สมมติว่าเรียกจากเมนูใน sidebar ที่เปิดอยู่เสมอ)
+    // ปรับให้ปิดเฉพาะตอนที่ sidebar เปิดอยู่จริง เพื่อรองรับ bottom nav บนมือถือที่เรียก switchView()
+    // ตอน sidebar ปิดอยู่แล้ว (ไม่งั้นจะกลายเป็นเปิด sidebar ขึ้นมาโดยไม่ตั้งใจ)
+    const sb = document.getElementById('sidebar');
+    if (window.innerWidth <= 992 && sb && sb.classList.contains('active')) toggleSidebar();
 }
 
 // โชว์/ซ่อน dropdown ตัวกรองด้านบน ตาม view ปัจจุบัน + ว่ากำลังกรองเฉพาะ 'กำลังทดลอง' จากการ์ด TEST อยู่หรือไม่
@@ -416,7 +420,7 @@ function renderTable() {
                 const s = (m["Status"] || "Stock").trim();
                 const bClass = getStatusBadgeClass(s);
                 const p = parseInt(m["Period"]) || 0;
-                const periodStyle = p > 365 ? 'color:#e67e22; font-weight:bold;' : '';
+                const periodStyle = p > 365 ? 'color:#c9701e; font-weight:bold;' : '';
 
                 tr.innerHTML = `
                     <td data-label="${labels[0]}"><div class="val-text">${escapeHtml(m["S/N Analyzer"]) || "-"}</div></td>
@@ -448,24 +452,24 @@ function renderTable() {
                 if (trialStatusQuickFilter === 'In Progress') {
                     // มุมมองย่อจากการ์ด TEST: ซ่อนวันสิ้นสุดทดลอง/สถานะทดลอง/ผลลัพธ์ เพราะทุกแถวคือ "กำลังทดลอง" อยู่แล้ว ไม่มีข้อมูลใหม่จะโชว์
                     tr.innerHTML = `
-                        <td data-label="${labels[0]}"><div class="val-text" style="font-weight:bold; color:#1b4332;">${escapeHtml(translateClient(clientName))}</div></td>
+                        <td data-label="${labels[0]}"><div class="val-text" style="font-weight:bold; color:#2C4C3A;">${escapeHtml(translateClient(clientName))}</div></td>
                         <td data-label="${labels[1]}"><div class="val-text">${escapeHtml(snVal)}</div></td>
                         <td data-label="${labels[2]}"><div class="val-text">${escapeHtml(m["Model"]) || "-"}</div></td>
                         <td data-label="${labels[3]}"><div class="val-text"><span class="mode-tag">${escapeHtml(m["Mode"]) || "-"}</span></div></td>
                         <td data-label="${labels[4]}"><div class="val-text">${escapeHtml(locVal)}</div></td>
                         <td data-label="${labels[5]}"><div class="val-text">${escapeHtml(formatDate(startDate))}</div></td>
-                        <td data-label="${labels[6]}"><div class="val-text" style="color:#e74c3c; font-weight:bold;">${escapeHtml(totalPeriod)} ${i18n[currentLang].days}</div></td>
+                        <td data-label="${labels[6]}"><div class="val-text" style="color:#d64545; font-weight:bold;">${escapeHtml(totalPeriod)} ${i18n[currentLang].days}</div></td>
                     `;
                 } else {
                     tr.innerHTML = `
-                        <td data-label="${labels[0]}"><div class="val-text" style="font-weight:bold; color:#1b4332;">${escapeHtml(translateClient(clientName))}</div></td>
+                        <td data-label="${labels[0]}"><div class="val-text" style="font-weight:bold; color:#2C4C3A;">${escapeHtml(translateClient(clientName))}</div></td>
                         <td data-label="${labels[1]}"><div class="val-text">${escapeHtml(snVal)}</div></td>
                         <td data-label="${labels[2]}"><div class="val-text">${escapeHtml(m["Model"]) || "-"}</div></td>
                         <td data-label="${labels[3]}"><div class="val-text"><span class="mode-tag">${escapeHtml(m["Mode"]) || "-"}</span></div></td>
                         <td data-label="${labels[4]}"><div class="val-text">${escapeHtml(locVal)}</div></td>
                         <td data-label="${labels[5]}"><div class="val-text">${escapeHtml(formatDate(startDate))}</div></td>
                         <td data-label="${labels[6]}"><div class="val-text">${trialStatusVal === 'Completed' ? escapeHtml(formatDate(endDate)) : '-'}</div></td>
-                        <td data-label="${labels[7]}"><div class="val-text" style="color:#e74c3c; font-weight:bold;">${escapeHtml(totalPeriod)} ${i18n[currentLang].days}</div></td>
+                        <td data-label="${labels[7]}"><div class="val-text" style="color:#d64545; font-weight:bold;">${escapeHtml(totalPeriod)} ${i18n[currentLang].days}</div></td>
                         <td data-label="${labels[8]}"><div class="val-text">${trialStatusBadge}</div></td>
                         <td data-label="${labels[9]}"><div class="val-text">${resultBadge}</div></td>
                     `;
@@ -602,88 +606,85 @@ function openMachineHistoryModal(serialNumber) {
     const machineInfo = machineIndex.get(String(serialNumber)) || rejectedMachines.find(m => findKey(m, ["SN Analyzer", "S/N Analyzer"]) === serialNumber) || {};
     const machineHistories = histories.filter(h => String(h["S/N Analyzer"]) === String(serialNumber));
 
-    // สร้างตารางประวัติ
+    // สร้างรายการประวัติ — ใช้ card แบบ flex/grid (ไม่ใช่ <table>) เพื่อให้อ่านง่ายทั้งจอเล็ก/ใหญ่
+    // โดยไม่ต้องพึ่งการ "ยุบตาราง" ของ CSS media query ซึ่งออกแบบมาเฉพาะตารางหลักของแอปเท่านั้น
     let historyRowsHTML = machineHistories.map(h => {
         const days = calculateTrialDays(h["Start Date"], h["End Date"], h["Status"]);
         const statusBadge = h["Status"] === 'Completed' ? `<span class="badge bg-complete">เสร็จสิ้น</span>` : `<span class="badge bg-test">กำลังทดลอง</span>`;
         const resultValNorm = normalizeResult(h["Result"]);
-        const resultText = resultValNorm === 'Bought' ? `<b style="color: green;">ซื้อแล้ว</b>` : (resultValNorm === 'Not Bought' ? `<b style="color: red;">ไม่ซื้อ</b>` : `<b style="color:#f39c12;">รอพิจารณา</b>`);
-        
+        const resultText = resultValNorm === 'Bought' ? `<b style="color: #2f9e58;">ซื้อแล้ว</b>` : (resultValNorm === 'Not Bought' ? `<b style="color: #d64545;">ไม่ซื้อ</b>` : `<b style="color:#e08e0b;">รอพิจารณา</b>`);
+
         // Escape เครื่องหมายคำพูดสำหรับใส่ใน onClick
         const hDataStr = encodeURIComponent(JSON.stringify(h));
 
         return `
-        <tr style="border-bottom: 1px solid #eee;">
-            <td style="padding: 10px; font-size: 12px;">
-                ${escapeHtml(formatDate(h["Start Date"]))} <br>ถึง ${escapeHtml(formatDate(h["End Date"]))}<br>
-                <span style="color:#e67e22; font-weight:bold;">(${days} วัน)</span>
-            </td>
-            <td style="padding: 10px;">
-                <b>${escapeHtml(h["Client Name"])}</b><br><small style="color:#666;">${escapeHtml(h["Location"])}</small>
-            </td>
-            <td style="padding: 10px; text-align:center;">
-                ${statusBadge}<br>${resultText}<br><small style="color:#888;">${escapeHtml(h["Remark"]) || ""}</small>
-            </td>
-            <td style="padding: 10px; text-align:center;">
-                ${isAdmin ? `
-                    <button onclick="editHistoryModal('${hDataStr}')" style="background:var(--action-warning); color:#fff; border:none; padding:5px 8px; border-radius:4px; cursor:pointer; margin-right:4px;"><i class="fas fa-edit"></i></button>
-                    <button onclick="deleteHistory('${h["ID"]}')" style="background:var(--action-danger); color:#fff; border:none; padding:5px 8px; border-radius:4px; cursor:pointer;"><i class="fas fa-trash"></i></button>
-                ` : `<i class="fas fa-lock" style="color:#bbb;" title="Admin เท่านั้น"></i>`}
-            </td>
-        </tr>`;
+        <div class="history-card">
+            <div class="history-card-head">
+                <div class="history-period">
+                    ${escapeHtml(formatDate(h["Start Date"]))} &rarr; ${escapeHtml(formatDate(h["End Date"]))}
+                    &nbsp;<span class="history-duration">(${days} วัน)</span>
+                </div>
+                <div class="history-actions">
+                    ${isAdmin ? `
+                        <button class="icon-action-btn" onclick="editHistoryModal('${hDataStr}')" style="background:var(--action-warning);" title="แก้ไข"><i class="fas fa-edit"></i></button>
+                        <button class="icon-action-btn" onclick="deleteHistory('${h["ID"]}')" style="background:var(--action-danger);" title="ลบ"><i class="fas fa-trash"></i></button>
+                    ` : `<i class="fas fa-lock" style="color:#bbb;" title="Admin เท่านั้น"></i>`}
+                </div>
+            </div>
+            <div class="history-client-row">
+                <span class="history-client-name">${escapeHtml(h["Client Name"])}</span>
+                <span class="history-location">${escapeHtml(h["Location"])}</span>
+            </div>
+            <div class="history-status-row">
+                ${statusBadge}
+                ${resultText}
+                ${h["Remark"] ? `<span class="history-remark">${escapeHtml(h["Remark"])}</span>` : ''}
+            </div>
+        </div>`;
     }).join('');
 
     Swal.fire({
-        title: `<div style="color:var(--c2-dark); font-size:20px;">ประวัติเครื่อง: ${escapeHtml(serialNumber)}</div>`,
+        title: `<div style="color:var(--c2-dark); font-size:19px;">ประวัติเครื่อง: ${escapeHtml(serialNumber)}</div>`,
         html: `
-            <div style="text-align: left; max-height: 70vh; overflow-y: auto;">
-                <!-- ครึ่งบน: ข้อมูลเครื่อง -->
-                <div style="background: #f8fbf9; padding: 15px; border-radius: 12px; margin-bottom: 15px; border: 1px solid #e0f2e5; font-size: 14px;">
-                    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
-                        <div>
-                            <p style="margin: 5px 0;"><b>ลูกค้า:</b> ${escapeHtml(machineInfo["Client name"]) || "-"} &nbsp;|&nbsp; <b>สถานที่:</b> ${escapeHtml(machineInfo["Location"]) || "-"}</p>
-                            <p style="margin: 5px 0;"><b>Mode:</b> ${escapeHtml(machineInfo["Mode"]) || "-"} &nbsp;|&nbsp; <b>Type:</b> ${escapeHtml(machineInfo["Type"]) || "-"}</p>
-                            <p style="margin: 5px 0;"><b>Model:</b> ${escapeHtml(machineInfo["Model"]) || "-"} &nbsp;|&nbsp; <b>Status ปัจจุบัน:</b> <span class="badge ${getStatusBadgeClass(machineInfo["Status"])}">${escapeHtml(String(machineInfo["Status"] || "-").toUpperCase())}</span></p>
+            <div style="text-align: left;">
+                <!-- ข้อมูลเครื่อง -->
+                <div class="machine-info-card">
+                    <div class="machine-info-head">
+                        <div class="info-grid">
+                            <div class="info-item"><span class="info-label">ลูกค้า</span><span class="info-value">${escapeHtml(machineInfo["Client name"]) || "-"}</span></div>
+                            <div class="info-item"><span class="info-label">สถานที่</span><span class="info-value">${escapeHtml(machineInfo["Location"]) || "-"}</span></div>
+                            <div class="info-item"><span class="info-label">Mode</span><span class="info-value">${escapeHtml(machineInfo["Mode"]) || "-"}</span></div>
+                            <div class="info-item"><span class="info-label">Type</span><span class="info-value">${escapeHtml(machineInfo["Type"]) || "-"}</span></div>
+                            <div class="info-item"><span class="info-label">Model</span><span class="info-value">${escapeHtml(machineInfo["Model"]) || "-"}</span></div>
+                            <div class="info-item"><span class="info-label">Status ปัจจุบัน</span><span class="badge ${getStatusBadgeClass(machineInfo["Status"])}">${escapeHtml(String(machineInfo["Status"] || "-").toUpperCase())}</span></div>
                         </div>
                         ${isAdmin ? `
-                            <button onclick="editMachineModal('${escapeHtml(serialNumber)}')" style="background:var(--action-info); color:white; border:none; padding:6px 10px; border-radius:6px; cursor:pointer; font-size:11px; font-weight:bold; white-space:nowrap; flex-shrink:0;">
-                                <i class="fas fa-pen"></i> แก้ไขข้อมูลเครื่อง
+                            <button class="icon-action-btn" style="width:auto; padding:0 12px; gap:6px;" onclick="editMachineModal('${escapeHtml(serialNumber)}')" title="แก้ไขข้อมูลเครื่อง">
+                                <i class="fas fa-pen"></i>
                             </button>
                         ` : ''}
                     </div>
                 </div>
 
-                <!-- ครึ่งล่าง: ตาราง History -->
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <h4 style="margin: 0; color: #1b4332; font-size:16px;">ประวัติการทดลอง (History)</h4>
+                <!-- ประวัติ -->
+                <div class="history-section-head">
+                    <h4>ประวัติการทดลอง (History)</h4>
                     ${isAdmin ? `
-                        <button onclick="addHistoryModal('${serialNumber}')" style="background: var(--action-success); color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 12px;">
+                        <button onclick="addHistoryModal('${serialNumber}')" style="background: var(--action-success); color: white; border: none; padding: 8px 14px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 12px; min-height:36px;">
                             <i class="fas fa-plus"></i> เพิ่มประวัติ
                         </button>
                     ` : `
-                        <button onclick="adminAuth()" style="background: var(--action-muted); color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 12px;" title="ต้องล็อกอินเป็น Admin ก่อน">
+                        <button onclick="adminAuth()" style="background: var(--action-muted); color: white; border: none; padding: 8px 14px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 12px; min-height:36px;" title="ต้องล็อกอินเป็น Admin ก่อน">
                             <i class="fas fa-lock"></i> เพิ่มประวัติ (Admin เท่านั้น)
                         </button>
                     `}
                 </div>
-                <div style="overflow-x: auto; border: 1px solid #eee; border-radius: 8px;">
-                    <table style="width: 100%; min-width: 500px; font-size: 13px; border-collapse: collapse;">
-                        <thead style="background: #f1f3f5;">
-                            <tr>
-                                <th style="padding:10px; text-align:left;">ช่วงเวลา</th>
-                                <th style="padding:10px; text-align:left;">ลูกค้า / สถานที่</th>
-                                <th style="padding:10px; text-align:center;">สถานะ / ผลลัพธ์</th>
-                                <th style="padding:10px; text-align:center;">จัดการ</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${historyRowsHTML || '<tr><td colspan="4" style="text-align:center; color:#999; padding:20px;">ยังไม่มีประวัติการเคลื่อนย้าย</td></tr>'}
-                        </tbody>
-                    </table>
+                <div class="history-list">
+                    ${historyRowsHTML || '<div class="history-empty">ยังไม่มีประวัติการเคลื่อนย้าย</div>'}
                 </div>
             </div>
         `,
-        width: '800px',
+        width: '640px',
         showCloseButton: true,
         showConfirmButton: false
     });
@@ -712,7 +713,7 @@ async function addHistoryModal(serialNumber) {
             showCancelButton: true,
             confirmButtonText: 'ดำเนินการต่อ',
             cancelButtonText: 'ยกเลิก',
-            confirmButtonColor: '#e67e22'
+            confirmButtonColor: '#c9701e'
         });
 
         if (!confirmClose.isConfirmed) {
@@ -776,7 +777,7 @@ function deleteHistory(id) {
         text: "คุณไม่สามารถกู้คืนข้อมูลนี้ได้!",
         icon: 'warning',
         showCancelButton: true,
-        confirmButtonColor: '#e74c3c',
+        confirmButtonColor: '#d64545',
         confirmButtonText: 'ใช่, ลบทิ้งเลย',
         cancelButtonText: 'ยกเลิก'
     }).then((result) => {
@@ -1118,7 +1119,7 @@ function dashboardLegendRow(color, label, count, pct) {
     return `
         <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
             <span style="width:13px; height:13px; border-radius:4px; background:${color}; display:inline-block; flex-shrink:0;"></span>
-            <span style="min-width:80px; font-weight:700; color:#333;">${label}</span>
+            <span style="min-width:80px; font-weight:700; color:#201E1D;">${label}</span>
             <span style="color:#666; font-size:13px;">${count} เครื่อง <b style="color:${color};">(${pct}%)</b></span>
         </div>
     `;
@@ -1132,7 +1133,7 @@ function showDashboard() {
     const COLOR_BOUGHT = "#2e7d32";
     const COLOR_NOTBOUGHT = "#c62828";
     const COLOR_PENDING = "#d4a017";
-    const COLOR_PROGRESS = "#1565c0";
+    const COLOR_PROGRESS = "#2f6fb0";
 
     Swal.fire({
         title: `<div style="color:var(--c2-dark); font-size:22px; font-weight:800;"><i class="fas fa-chart-pie"></i> Dashboard ภาพรวมการทดลอง</div>`,
@@ -1200,3 +1201,28 @@ function showDashboard() {
         }
     });
 }
+/* =========================================================================================
+   MOBILE BOTTOM NAV — additive UI sync only.
+   Does not modify any data/API/business logic above; simply wraps switchView() and
+   showDashboard() so the mobile bottom tab bar highlights the active view correctly,
+   including when a view change is triggered from the sidebar or a stat card.
+========================================================================================= */
+function setActiveBottomNav(id) {
+    document.querySelectorAll('.bottom-nav-item').forEach(el => el.classList.remove('active'));
+    const el = document.getElementById(id);
+    if (el) el.classList.add('active');
+}
+
+(function () {
+    const _switchView = switchView;
+    switchView = function (view) {
+        _switchView(view);
+        setActiveBottomNav(view === 'all' ? 'bnav-all' : 'bnav-rejected');
+    };
+
+    const _showDashboard = showDashboard;
+    showDashboard = function () {
+        _showDashboard();
+        setActiveBottomNav('bnav-dashboard');
+    };
+})();
