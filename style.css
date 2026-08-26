@@ -674,10 +674,15 @@ a { color: var(--c2-medium); }
     min-height: 32px;
 }
 
-input[type="text"],
-input[type="date"],
-input[type="password"],
-select {
+/* :not(.swal2-input)/:not(.swal2-select) กันไม่ให้กฎ width:100% นี้ไปโดนช่องกรอกใน popup ของ SweetAlert2
+   (เช่น dialog "Admin Access") เพราะ input[type="password"] เป็น attribute selector ซึ่งมี specificity
+   สูงกว่ากฎ width:auto เดิมของ SweetAlert2 เอง (ที่เขียนแบบ element selector ธรรมดา) ทำให้ชนะทับไปโดยไม่ตั้งใจ
+   ผลคือช่องกรอกรหัสผ่านใน popup ถูกยืด width:100% ของกล่อง popup แบบไม่หัก margin ซ้าย-ขวาของตัวเองออก
+   ทำให้ล้นขอบ popup ไปทางขวา (ปัญหาที่เจอ: "ช่องกรอก pass ยาวเกินความพอดี") */
+input[type="text"]:not(.swal2-input),
+input[type="date"]:not(.swal2-input),
+input[type="password"]:not(.swal2-input),
+select:not(.swal2-select) {
     width: 100%;
     padding: 13px 14px;
     border-radius: 11px;
@@ -689,8 +694,8 @@ select {
     transition: 0.15s;
 }
 
-input:focus,
-select:focus {
+input:not(.swal2-input):focus,
+select:not(.swal2-select):focus {
     border-color: var(--brand-main);
     outline: none;
     background: #fff;

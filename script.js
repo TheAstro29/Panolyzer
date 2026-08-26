@@ -11,7 +11,10 @@ let searchTimeout;
 // --- ระบบ Admin Login สำหรับปลดล็อกการเพิ่มข้อมูล ---
 let isAdmin = false;
 let adminPasswordCache = ''; // เก็บรหัสไว้ใน memory เท่านั้น (ไม่ persist) เพื่อส่งให้ backend เช็คซ้ำทุกครั้งที่แก้ไขข้อมูล
-const _0x1a2b = "MTkwOTE1MTI="; // เก็บรหัสแบบ base64 (เหมือนระบบ Service Tracker)
+// หมายเหตุ: เดิมเก็บรหัสผ่าน Admin ไว้ในไฟล์นี้แบบ base64 (ตัวแปรชื่อ _0x1a2b) เพื่อเทียบกันเองฝั่ง client
+// ก่อนส่งไปเซิร์ฟเวอร์อีกที — ปัญหาคือ base64 ไม่ใช่การเข้ารหัส ใครก็ตามที่เปิด DevTools ดู source ของหน้าเว็บ
+// สามารถ atob() ถอดรหัสผ่านจริงออกมาได้ทันที ตอนนี้ตัดออกทั้งหมดแล้ว ให้ backend (Code.gs) เป็นคนตรวจสอบรหัสผ่าน
+// เพียงผู้เดียว ฝั่งนี้แค่ส่งรหัสที่ผู้ใช้กรอกไปให้เช็ค แล้วรับรู้แค่ผล success/error กลับมาเท่านั้น
 
 async function adminAuth() {
     if (isAdmin) {
@@ -29,19 +32,40 @@ async function adminAuth() {
         inputPlaceholder: 'Password',
         confirmButtonColor: '#2C4C3A',
         showCancelButton: true,
-        cancelButtonText: 'ยกเลิก'
+        cancelButtonText: 'ยกเลิก',
+        showLoaderOnConfirm: true,
+        allowOutsideClick: () => !Swal.isLoading(),
+        preConfirm: async (value) => {
+            if (!value) {
+                Swal.showValidationMessage('กรุณากรอกรหัสผ่าน');
+                return false;
+            }
+            try {
+                const response = await fetch(scriptURL, {
+                    method: 'POST',
+                    body: JSON.stringify({ action: 'verify_admin', adminPassword: value }),
+                    headers: { "Content-Type": "text/plain;charset=utf-8" } // ใช้ text/plain เลี่ยงปัญหา CORS Preflight
+                });
+                const result = await response.json();
+                if (result.status !== 'success') {
+                    Swal.showValidationMessage(result.message || 'รหัสผ่านไม่ถูกต้อง');
+                    return false;
+                }
+                return value;
+            } catch (e) {
+                console.error("Error verifying admin password:", e);
+                Swal.showValidationMessage('ไม่สามารถเชื่อมต่อเพื่อตรวจสอบรหัสผ่านได้ กรุณาลองใหม่อีกครั้ง');
+                return false;
+            }
+        }
     });
 
-    if (password === undefined) return; // กดยกเลิก
+    if (password === undefined) return; // กดยกเลิก หรือรหัสผ่านไม่ถูกต้อง (preConfirm คืนค่า false)
 
-    if (btoa(password) === _0x1a2b) {
-        isAdmin = true;
-        adminPasswordCache = password;
-        updateLockIcons();
-        Toast.fire({ icon: 'success', title: 'ยินดีต้อนรับ Admin' });
-    } else if (password) {
-        Swal.fire({ icon: 'error', title: 'รหัสผ่านไม่ถูกต้อง' });
-    }
+    isAdmin = true;
+    adminPasswordCache = password;
+    updateLockIcons();
+    Toast.fire({ icon: 'success', title: 'ยินดีต้อนรับ Admin' });
 }
 
 function updateLockIcons() {
