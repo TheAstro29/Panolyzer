@@ -1,4 +1,4 @@
-const scriptURL = "https://script.google.com/macros/s/AKfycbwTreMfsLHYUq7TEW8nu7brQKyuLL-ALyRRa4pdzNFopY-TlRg4UXo3Ei4AVLk-KOv0/exec";
+const scriptURL = "https://script.google.com/macros/s/AKfycbzVzNPx9iTSbJwdaYH3YSNRuyaMgXel40oWfDlzY8KlMLXG2X5-1X63A9QBgF8JDD-z/exec";
 const CACHE_KEY = "c2tech_machines_data_v3"; // เปลี่ยน Key Cache เพื่อรีเซ็ตของเก่า
 let machines = [];
 let rejectedMachines = [];
