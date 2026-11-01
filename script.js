@@ -36,7 +36,7 @@ const normResult=v=>{const x=String(v||'').trim();return x==='Bought'||x==='Not 
 function ingest(data){
   const ms=(Array.isArray(data)?data:(data.machines||[])).filter(r=>String(r["Type"]||'').toLowerCase()!=='sorter'&&String(r["S/N Analyzer"]||'').trim());
   S.machines=ms.map(r=>({sn:String(r["S/N Analyzer"]).trim(),edge:r["S/N Edge server"]||'',model:r["Model"]||'',mode:r["Mode"]||'',type:r["Type"]||'',
-    status:normStatus(r["Status"]),raw:String(r["Status"]||'').trim(),client:r["Client name"]||'',loc:r["Location"]||'',deliv:ymd(r["Delivery date"]),period:parseInt(r["Period"],10)}));
+    status:normStatus(r["Status"]),raw:String(r["Status"]||'').trim(),client:r["Client name"]||'',loc:r["Location"]||'',deliv:ymd(r["Delivery date"]),period:parseInt(r["Period"],10),pmDone:!!(r["PM1_Status"]||r["PM2_Status"]||r["PM3_Status"])}));
   S.hist=(Array.isArray(data)?[]:(data.histories||[])).filter(h=>String(h["S/N Analyzer"]||'').trim()).map(h=>({id:String(h["ID"]),sn:String(h["S/N Analyzer"]).trim(),client:h["Client Name"]||'',loc:h["Location"]||'',
     start:ymd(h["Start Date"]),end:ymd(h["End Date"]),status:String(h["Status"]||'').trim()==='Completed'?'Completed':'In Progress',result:normResult(h["Result"]),remark:h["Remark"]||'',mode:h["Mode"]||''}));
 }
@@ -168,9 +168,15 @@ function drawer(){
   $('#drawer').innerHTML=`<div class="dh"><div class="t"><h2 class="num">${esc(m.sn)}</h2><div>${stPill(m.status)}<span class="tag">${esc(m.type)}</span><span class="tag">${esc(m.mode)}</span><span class="tag">${esc(m.model)}</span></div></div><button class="iconbtn" data-act="close" aria-label="ปิด">✕</button></div><div class="db">${body}</div>`;
 }
 const optsKeep=(list,cur)=>{const c=String(cur||'').trim();return (c&&!list.includes(c)?`<option value="${esc(c)}" selected>${esc(c)} (${L===T.th?'ค่าเดิมในชีต':'current'})</option>`:'')+list.map(v=>`<option ${c===v?'selected':''}>${v}</option>`).join('')};
+// ปิดทดลองแบบ "ซื้อ": วันส่งมอบ = วันสิ้นสุดการทดลอง + นัด PM1-3 (+4/+8/+12 เดือน แบบเดียวกับ backend) ถ้ายังไม่เคยเข้า PM
+const addMonths=(s,n)=>{const d=D(s);d.setMonth(d.getMonth()+n);return ymdOf(d)};
+function buyNote(m,end){const th=L===T.th;if(!end)return th?'ใส่วันสิ้นสุดการทดลองเพื่อใช้เป็นวันส่งมอบ':'Set the end date — it becomes the delivery date';
+  if(m.pmDone)return th?`วันส่งมอบจะเปลี่ยนเป็น <b>${fmtD(end)}</b> · นัด PM เดิมไม่เปลี่ยน (เครื่องนี้เคยเข้า PM แล้ว)`:`Delivery date becomes ${fmtD(end)} · existing PM schedule kept`;
+  return th?`วันส่งมอบจะเป็น <b>${fmtD(end)}</b> (วันสิ้นสุดการทดลอง) · นัด PM1 <b>${fmtD(addMonths(end,4))}</b> · PM2 ${fmtD(addMonths(end,8))} · PM3 ${fmtD(addMonths(end,12))}`
+    :`Delivery date ${fmtD(end)} · PM1 ${fmtD(addMonths(end,4))} · PM2 ${fmtD(addMonths(end,8))} · PM3 ${fmtD(addMonths(end,12))}`}
 function formHtml(m,hs,ot){
   const f=UI.form, th=L===T.th, today=TODAY;
-  const sync=`<div class="hint">${th?'ระบบอัปเดตสถานะเครื่องให้อัตโนมัติ: กำลังทดลอง → "กำลังทดลอง" · ซื้อ → "ขายแล้ว" · ไม่ซื้อ/รอพิจารณา → "ในคลัง" (ล้างชื่อลูกค้า) · แก้ประวัติเก่าย้อนหลังจะไม่เปลี่ยนสถานะเครื่อง':'Machine status updates automatically from the latest trial record.'}</div>`;
+  const sync=`<div class="hint">${th?'ระบบอัปเดตสถานะเครื่องให้อัตโนมัติ: กำลังทดลอง → "กำลังทดลอง" · ซื้อ → "ขายแล้ว" + วันส่งมอบ = วันสิ้นสุดทดลอง · ไม่ซื้อ/รอพิจารณา → "ในคลัง" (ล้างชื่อลูกค้า) · แก้ประวัติเก่าย้อนหลังจะไม่เปลี่ยนสถานะเครื่อง':'Machine status updates automatically from the latest trial record.'}</div>`;
   const acts=(save)=>`<div class="fa"><button class="btn" data-act="cancelForm">${th?'ยกเลิก':'Cancel'}</button><button class="btn pri" data-act="${save}">${th?'บันทึก':'Save'}</button></div>`;
   const resR=(cur)=>`<div class="radios">${['Bought','Not Bought','Pending'].map(k=>`<label style="--c:var(${RS_C[k][0]});--b:var(${RS_C[k][1]})"><input type="radio" name="ff-res" value="${k}" ${cur===k?'checked':''}>${L.res[k]}</label>`).join('')}</div>`;
   if(f.kind==='start') return `<div class="form"><h4>${th?'เริ่มทดลองกับลูกค้า':'Start a trial'}</h4>
@@ -182,6 +188,7 @@ function formHtml(m,hs,ot){
     <div class="f full"><label>${th?'หมายเหตุ':'Remark'}</label><input id="ff-rm" value="${esc(f.remark||'')}" placeholder="${th?'ไม่บังคับ':'optional'}"></div></div>${sync}${acts('saveStart')}</div>`;
   if(f.kind==='close') return `<div class="form"><h4>${th?'ปิดการทดลอง':'End trial'} · ${esc(ot.client)}</h4><div class="note info">${th?`ทดลองมาแล้ว ${days(ot.start)} วัน (เริ่ม ${fmtD(ot.start)})`:`Running ${days(ot.start)} days`}</div>
     <div class="f"><label>${th?'ผลการทดลอง *':'Result *'}</label>${resR(f.result)}</div>
+    <div class="note info" id="ff-buy" ${f.result==='Bought'?'':'hidden'}>📦 <span>${buyNote(m,f.end||TODAY)}</span></div>
     <div class="fg"><div class="f"><label>${th?'วันสิ้นสุดทดลอง':'End date'}</label><input type="date" id="ff-end" value="${f.end||today}"></div>
     <div class="f"><label>${th?'หมายเหตุ / เหตุผล':'Remark'}</label><input id="ff-rm" value="${esc(f.remark||ot.remark||'')}" placeholder="${th?'เช่น งบไม่พอ, รอใบเสนอราคา':'e.g. budget'}"></div></div>${sync}${acts('saveClose')}</div>`;
   if(f.kind==='hist'){ const x=f.id?S.hist.find(h=>h.id===f.id):{}; return `<div class="form"><h4>${f.id?(th?'แก้ไขประวัติ':'Edit history'):(th?'เพิ่มประวัติเอง':'Add history')}</h4>
@@ -249,7 +256,9 @@ document.addEventListener('input',e=>{const t=e.target;
   if(t.id==='q2'){UI.q2=t.value;clearTimeout(UI.qt);UI.qt=setTimeout(()=>{render(true);const q=$('#q2');q.focus();q.setSelectionRange(q.value.length,q.value.length)},180)}});
 document.addEventListener('change',e=>{const t=e.target;
   if(t.id==='fClient'){UI.clientF=t.value;render(true)} if(t.id==='fMode'){UI.modeF=t.value;render(true)}
-  if(t.name==='ff-res'&&UI.form)UI.form.result=t.value;});
+  if(t.name==='ff-res'&&UI.form){UI.form.result=t.value;updBuy()}
+  if(t.id==='ff-end'&&UI.form&&UI.form.kind==='close'){UI.form.end=t.value;updBuy()}});
+function updBuy(){const el=$('#ff-buy');if(!el)return;el.hidden=UI.form.result!=='Bought';el.querySelector('span').innerHTML=buyNote(M(UI.open),val('ff-end'))}
 function setLang(l){UI.lang=l;L=T[l];try{localStorage.setItem(LANG_KEY,l)}catch(e){}render(true);toast(l==='th'?'เปลี่ยนเป็นภาษาไทย':'Switched to English')}
 function act(a,v){
   const th=L===T.th;

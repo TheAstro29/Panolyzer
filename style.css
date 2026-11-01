@@ -299,3 +299,4 @@ tbody tr:last-child td{border-bottom:0}
 .drawer.busy .db{pointer-events:none;opacity:.6;transition:opacity .2s}
 #ldErr[hidden]{display:none}
 .demo{display:none}
+.note[hidden]{display:none}
