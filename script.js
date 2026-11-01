@@ -16,14 +16,14 @@ const addD=(s,n)=>{const d=D(s);d.setDate(d.getDate()+n);return d.toISOString().
 
 /* ---------- i18n (UI) ---------- */
 const T={th:{'nav.machines':'เครื่องทั้งหมด','nav.trials':'การทดลอง',refresh:'รีเฟรชข้อมูล',admin:'เข้าสู่ระบบ Admin',adminOut:'ออกจาก Admin',search:'ค้นหา S/N, ลูกค้า, สถานที่…',allClients:'ลูกค้าทั้งหมด',allModes:'ทุกโหมด',allTypes:'ทุกประเภท',clear:'ล้างตัวกรอง',units:'เครื่อง',days:'วัน',updated:'อัปเดต',
- st:{all:'ทั้งหมด',Stock:'ในคลัง',Test:'กำลังทดลอง',Complete:'ขายแล้ว',Broken:'ส่งซ่อม'},res:{Bought:'ซื้อ',"Not Bought":'ไม่ซื้อ',Pending:'รอพิจารณา'},
+ st:{all:'ทั้งหมด',Stock:'ในคลัง',Test:'กำลังทดลอง',Complete:'ขายแล้ว',Broken:'ส่งซ่อม'},res:{Swapped:'ซื้อ · รับเครื่องใหม่',Bought:'ซื้อ',"Not Bought":'ไม่ซื้อ',Pending:'รอพิจารณา'},
  cols:['S/N Analyzer','Model','ลูกค้า / สถานที่','Mode','ประเภท','สถานะ','ส่งมอบ','ใช้งานมา']},
 en:{'nav.machines':'All Machines','nav.trials':'Trials',refresh:'Refresh data',admin:'Admin login',adminOut:'Leave Admin',search:'Search S/N, client, location…',allClients:'All clients',allModes:'All modes',allTypes:'All types',clear:'Clear filters',units:'units',days:'days',updated:'Updated',
- st:{all:'All',Stock:'In stock',Test:'On trial',Complete:'Sold',Broken:'In repair'},res:{Bought:'Bought',"Not Bought":'Not bought',Pending:'Pending'},
+ st:{all:'All',Stock:'In stock',Test:'On trial',Complete:'Sold',Broken:'In repair'},res:{Swapped:'Bought · new unit',Bought:'Bought',"Not Bought":'Not bought',Pending:'Pending'},
  cols:['S/N Analyzer','Model','Client / Location','Mode','Type','Status','Delivered','In use']}};
 let L=T.th;
 const ST_C={Stock:['--stock','--stock-bg'],Test:['--test','--test-bg'],Complete:['--sold','--sold-bg'],Broken:['--broken','--broken-bg']};
-const RS_C={Bought:['--sold','--sold-bg'],"Not Bought":['--broken','--broken-bg'],Pending:['--pend','--pend-bg']};
+const RS_C={Swapped:['--sold','--sold-bg'],Bought:['--sold','--sold-bg'],"Not Bought":['--broken','--broken-bg'],Pending:['--pend','--pend-bg']};
 const pill=(txt,c)=>`<span class="pill" style="--c:var(${c[0]});--b:var(${c[1]})">${esc(txt)}</span>`;
 const stPill=s=>pill(L.st[s]||s,ST_C[s]||ST_C.Stock);
 const rsPill=r=>pill(L.res[r]||r,RS_C[r]||RS_C.Pending);
@@ -32,15 +32,19 @@ const fmtD=s=>{if(!s)return '–';const d=D(s);return d.toLocaleDateString(L===T
 /* ---------- ข้อมูลสมมติ ---------- */
 let S={machines:[],hist:[]};
 const normStatus=v=>{const x=String(v||'').toLowerCase();return x.includes('complete')?'Complete':x.includes('broken')?'Broken':(x.includes('test')||x.includes('progress'))?'Test':'Stock'};
-const normResult=v=>{const x=String(v||'').trim();return x==='Bought'||x==='Not Bought'?x:'Pending'};
+const normResult=v=>{const x=String(v||'').trim();return x==='Bought'||x==='Not Bought'||x==='Swapped'?x:'Pending'};
 function ingest(data){
   const ms=(Array.isArray(data)?data:(data.machines||[])).filter(r=>String(r["Type"]||'').toLowerCase()!=='sorter'&&String(r["S/N Analyzer"]||'').trim());
   S.machines=ms.map(r=>({sn:String(r["S/N Analyzer"]).trim(),edge:r["S/N Edge server"]||'',model:r["Model"]||'',mode:r["Mode"]||'',type:r["Type"]||'',
     status:normStatus(r["Status"]),raw:String(r["Status"]||'').trim(),client:r["Client name"]||'',loc:r["Location"]||'',deliv:ymd(r["Delivery date"]),period:parseInt(r["Period"],10),pmDone:!!(r["PM1_Status"]||r["PM2_Status"]||r["PM3_Status"]),pm1:ymd(r["PM1_Date"])}));
   S.hist=(Array.isArray(data)?[]:(data.histories||[])).filter(h=>String(h["S/N Analyzer"]||'').trim()).map(h=>({id:String(h["ID"]),sn:String(h["S/N Analyzer"]).trim(),client:h["Client Name"]||'',loc:h["Location"]||'',
-    start:ymd(h["Start Date"]),end:ymd(h["End Date"]),status:String(h["Status"]||'').trim()==='Completed'?'Completed':'In Progress',result:normResult(h["Result"]),remark:h["Remark"]||'',mode:h["Mode"]||''}));
+    start:ymd(h["Start Date"]),end:ymd(h["End Date"]),status:String(h["Status"]||'').trim()==='Completed'?'Completed':'In Progress',result:normResult(h["Result"]),remark:h["Remark"]||'',mode:h["Mode"]||'',swapRef:String(h["Swap_Ref"]||'').trim()}));
 }
 let UI={pw:'',busy:false,syncing:false,err:null,view:'dash',stF:'all',typeF:'all',modeF:'all',clientF:'all',q:'',sort:['use',-1],trTab:'open',resF:'all',open:null,form:null,admin:false,lang:'th',synced:''};
+// การสลับเครื่อง: รายการ "Swapped" บนเครื่อง demo ↔ รายการ "ซื้อ" บนเครื่องใหม่ (ผูกด้วย Swap_Ref)
+const isBought=h=>h.result==='Bought'||h.result==='Swapped';
+const isReceiver=h=>!!h.swapRef&&h.result!=='Swapped'&&S.hist.some(x=>x.id===h.swapRef&&x.result==='Swapped'); // รายการรับเครื่องใหม่ ไม่นับเป็นการทดลอง
+const trialsOnly=()=>S.hist.filter(h=>!isReceiver(h));
 const M=sn=>S.machines.find(m=>m.sn===sn)||(S.hist.some(h=>h.sn===sn)?{sn,edge:'',model:'',mode:'',type:'',status:'Stock',client:'',loc:'',deliv:'',missing:true}:null);
 const openTrial=sn=>S.hist.find(h=>h.sn===sn&&h.status==='In Progress');
 const noClient=m=>{const th=L===T.th;return m.status==='Broken'?(th?'อยู่ระหว่างซ่อม':'in repair'):m.status==='Stock'?(th?'อยู่ในคลัง':'in stock'):(th?'ยังไม่ระบุลูกค้า':'no client')};
@@ -90,7 +94,7 @@ function vMachines(){
 
 function vTrials(){
   const open=S.hist.filter(h=>h.status==='In Progress').sort((a,b)=>a.start.localeCompare(b.start));
-  const done=S.hist.filter(h=>h.status==='Completed');
+  const done=trialsOnly().filter(h=>h.status==='Completed');
   let h=`<div class="fixed"><div class="tabs" role="tablist"><button class="${UI.trTab==='open'?'on':''}" data-tr="open">${L===T.th?'กำลังทดลอง':'On trial'}<span class="ct num">${open.length}</span></button><button class="${UI.trTab==='done'?'on':''}" data-tr="done">${L===T.th?'จบแล้ว':'Finished'}<span class="ct num">${done.length}</span></button></div>`;
   const endFixed='</div><div class="scroll" id="sc">';
   if(UI.trTab==='open'){
@@ -104,11 +108,11 @@ function vTrials(){
         ${UI.admin?`<div class="acts"><button class="btn sm pri" data-act="closeTrial" data-v="${t.sn}">${L===T.th?'ปิดการทดลอง':'End trial'}</button></div>`:''}</div>`}).join('')+'</div></div>';
     return h;
   }
-  const cnt=k=>done.filter(x=>x.result===k).length;
+  const cnt=k=>done.filter(x=>k==='Bought'?isBought(x):x.result===k).length;
   h+=`<div class="filters"><div class="frow"><label class="search"><svg class="ms" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--mute)"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q2" placeholder="${L===T.th?'ค้นหาลูกค้า, S/N, จังหวัด…':'Search client, S/N, province…'}" value="${esc(UI.q2||'')}"></label></div>
     <div class="chips">${['all','Not Bought','Pending','Bought'].map(k=>`<button class="chip ${UI.resF===k?'on':''}" data-res="${k}" style="--c:var(${k==='all'?'--brand':RS_C[k][0]})">${k==='all'?'':'<i></i>'}${k==='all'?L.st.all:L.res[k]} <b class="num">${k==='all'?done.length:cnt(k)}</b></button>`).join('')}</div></div>`+endFixed;
   const q=(UI.q2||'').toLowerCase();
-  let list=done.filter(x=>(UI.resF==='all'||x.result===UI.resF)&&(!q||[x.client,x.sn,x.loc].join(' ').toLowerCase().includes(q)));
+  let list=done.filter(x=>(UI.resF==='all'||(UI.resF==='Bought'?isBought(x):x.result===UI.resF))&&(!q||[x.client,x.sn,x.loc].join(' ').toLowerCase().includes(q)));
   list.sort((a,b)=>((a.result==='Not Bought'?0:1)-(b.result==='Not Bought'?0:1))||(days(b.start,b.end)-days(a.start,a.end)));
   if(!list.length) return h+`<div class="card empty">${L===T.th?'ไม่พบรายการ':'Nothing found'}</div></div>`;
   const C=L===T.th?['ลูกค้า / จังหวัด','S/N Analyzer','Model','Mode','ช่วงทดลอง','รวม','ผล']:['Client / Province','S/N Analyzer','Model','Mode','Trial period','Total','Result'];
@@ -118,24 +122,28 @@ function vTrials(){
 }
 
 function vDash(){
-  const ms=S.machines, sold=ms.filter(m=>m.status==='Complete').length;
-  const done=S.hist.filter(h=>h.status==='Completed'), open=S.hist.filter(h=>h.status==='In Progress');
-  const nb=done.filter(h=>h.result==='Not Bought'), pd=done.filter(h=>h.result==='Pending');
-  const total=sold+nb.length+pd.length, pct=n=>total?Math.round(n/total*100):0;
-  const kpi=(l,v,s,c)=>`<div class="kpi"><small><i style="--c:var(${c})"></i>${l}</small><b class="num">${v}</b><em>${s}</em></div>`;
-  let h=`<div class="scroll whole" id="sc"><div class="dgrid">${kpi(L.st.Complete,sold,`${pct(sold)}% ${L===T.th?'ของเครื่องที่ทดลองจบแล้ว':'of finished trials'}`,'--sold')}${kpi(L.res['Not Bought'],nb.length,`${pct(nb.length)}%`,'--broken')}${kpi(L.res.Pending,pd.length,`${pct(pd.length)}% · ${L===T.th?'ต้องติดตาม':'follow up'}`,'--pend')}${kpi(L.st.Test,open.length,L===T.th?'ยังไม่จบการทดลอง':'not finished yet','--test')}</div>`;
-  // donut
-  const segs=[[sold,'--sold',L.st.Complete],[nb.length,'--broken',L.res['Not Bought']],[pd.length,'--pend',L.res.Pending]];
+  const th=L===T.th, ms=S.machines, st=k=>ms.filter(m=>m.status===k).length;
+  const trials=trialsOnly(), done=trials.filter(h=>h.status==='Completed'), open=trials.filter(h=>h.status==='In Progress');
+  const bought=done.filter(isBought), swapped=done.filter(h=>h.result==='Swapped'), nb=done.filter(h=>h.result==='Not Bought'), pd=done.filter(h=>h.result==='Pending');
+  const pct=(n,t)=>t?Math.round(n/t*100):0, conv=pct(bought.length,done.length);
+  const custs=new Set(trials.map(h=>String(h.client||'').trim()).filter(Boolean)).size;
+  const noTrialSold=ms.filter(m=>m.status==='Complete'&&!S.hist.some(h=>h.sn===m.sn&&isBought(h))).length;
+  const kpi=(l,v,s,c,u)=>`<div class="kpi"><small><i style="--c:var(${c})"></i>${l}</small><b class="num">${v}${u?`<u>${u}</u>`:''}</b><em>${s}</em></div>`;
+  const lr=k=>{const a=ms.filter(m=>m.status===k);return `Lab ${a.filter(m=>m.type==='Lab').length} · RT ${a.filter(m=>m.type==='Real-time').length}`};
+  let h=`<div class="scroll whole" id="sc">
+   <div class="dsec"><h2>${th?'เครื่อง':'Machines'}<small>${th?'นับเป็นเครื่อง · สถานะปัจจุบันในชีต Panolyzer Data':'counted per machine · current status'}</small></h2></div>
+   <div class="dgrid d5">${kpi(th?'ทั้งหมด':'All',ms.length,`Lab ${ms.filter(m=>m.type==='Lab').length} · Real-time ${ms.filter(m=>m.type==='Real-time').length}`,'--brand',th?'เครื่อง':'')}${kpi(L.st.Stock,st('Stock'),lr('Stock'),'--stock')}${kpi(L.st.Test,st('Test'),lr('Test'),'--test')}${kpi(L.st.Complete,st('Complete'),noTrialSold?`${lr('Complete')} · ${th?'ไม่มีประวัติทดลอง':'no trial'} ${noTrialSold}`:lr('Complete'),'--sold')}${kpi(L.st.Broken,st('Broken'),lr('Broken'),'--broken')}</div>
+   <div class="dsec"><h2>${th?'การทดลอง':'Trials'}<small>${th?`นับเป็นครั้ง · ${trials.length} ครั้ง กับลูกค้า ${custs} ราย (1 เครื่องทดลองได้หลายครั้ง)`:`counted per trial · ${trials.length} trials, ${custs} clients`}</small></h2></div>
+   <div class="dgrid">${kpi(th?'ซื้อ':'Bought',bought.length,`${conv}% ${th?'ของที่ทดลองจบแล้ว':'of finished'}${swapped.length?` · ${th?'รับเครื่องใหม่':'new unit'} ${swapped.length}`:''}`,'--sold',th?'ครั้ง':'')}${kpi(L.res['Not Bought'],nb.length,`${pct(nb.length,done.length)}%`,'--broken',th?'ครั้ง':'')}${kpi(L.res.Pending,pd.length,`${pct(pd.length,done.length)}% · ${th?'ต้องติดตาม':'follow up'}`,'--pend',th?'ครั้ง':'')}${kpi(L.st.Test,open.length,th?'ยังไม่จบการทดลอง':'not finished','--test',th?'ครั้ง':'')}</div>`;
+  const segs=[[bought.length,'--sold',th?'ซื้อ':'Bought'],[nb.length,'--broken',L.res['Not Bought']],[pd.length,'--pend',L.res.Pending]];
   const Cc=2*Math.PI*40; let acc=0;
-  const arcs=total?segs.map(([v,c])=>{if(!v)return '';const len=v/total*Cc, gap=Math.min(2,len*.2);const a=`<circle r="40" cx="50" cy="50" fill="none" stroke="var(${c})" stroke-width="16" stroke-dasharray="${(len-gap).toFixed(2)} ${(Cc-len+gap).toFixed(2)}" stroke-dashoffset="${(-acc).toFixed(2)}"/>`;acc+=len;return a}).join(''):'';
-  const conv=total?Math.round(sold/total*100):0;
-  h+=`<div class="d2"><div class="card"><h3>${L===T.th?'ผลการทดลองทั้งหมด':'Trial outcomes'}<small>${total} ${L.units} · ${L===T.th?'ขายแล้วนับจากสถานะเครื่องจริง':'sold = actual machine status'}</small></h3>
-    <div class="donutw"><svg viewBox="0 0 100 100" width="170" height="170" role="img" aria-label="สัดส่วนผลการทดลอง"><g transform="rotate(-90 50 50)"><circle r="40" cx="50" cy="50" fill="none" stroke="var(--line2)" stroke-width="16"/>${arcs}</g><text x="50" y="50" text-anchor="middle" style="font:700 17px 'Chakra Petch';fill:var(--ink)">${conv}%</text><text x="50" y="62" text-anchor="middle" style="font:500 7px 'Chakra Petch';fill:var(--sub)">${L===T.th?'ทดลองแล้วซื้อ':'converted'}</text></svg>
-    <div class="lg">${segs.map(([v,c,l])=>`<span><i style="--c:var(${c})"></i>${l}<b class="num">${v} (${pct(v)}%)</b></span>`).join('')}</div></div></div>`;
-  // fleet
+  const arcs=done.length?segs.map(([v,c])=>{if(!v)return '';const len=v/done.length*Cc, gap=Math.min(2,len*.2);const a=`<circle r="40" cx="50" cy="50" fill="none" stroke="var(${c})" stroke-width="16" stroke-dasharray="${(len-gap).toFixed(2)} ${(Cc-len+gap).toFixed(2)}" stroke-dashoffset="${(-acc).toFixed(2)}"/>`;acc+=len;return a}).join(''):'';
+  h+=`<div class="d2"><div class="card"><h3>${th?'ผลการทดลองที่จบแล้ว':'Finished trials'}<small>${done.length} ${th?'ครั้ง':'trials'}</small></h3>
+    <div class="donutw"><svg viewBox="0 0 100 100" width="170" height="170" role="img" aria-label="สัดส่วนผลการทดลอง"><g transform="rotate(-90 50 50)"><circle r="40" cx="50" cy="50" fill="none" stroke="var(--line2)" stroke-width="16"/>${arcs}</g><text x="50" y="50" text-anchor="middle" style="font:700 17px 'Chakra Petch';fill:var(--ink)">${conv}%</text><text x="50" y="62" text-anchor="middle" style="font:500 7px 'Chakra Petch';fill:var(--sub)">${th?'ทดลองแล้วซื้อ':'converted'}</text></svg>
+    <div class="lg">${segs.map(([v,c,l])=>`<span><i style="--c:var(${c})"></i>${l}<b class="num">${v} (${pct(v,done.length)}%)</b></span>`).join('')}${swapped.length?`<span class="f" style="font-size:12.5px;color:var(--sub)">🔁 ${th?`ในจำนวนซื้อ ${swapped.length} ครั้งลูกค้ารับเครื่องใหม่ (สลับเครื่อง)`:`${swapped.length} received a new unit`}</span>`:''}</div></div></div>`;
   const rows=[['Lab',m=>m.type==='Lab'],['Real-time',m=>m.type==='Real-time']];
-  h+=`<div class="card"><h3>${L===T.th?'สถานะเครื่องตามประเภท':'Fleet by type'}<small>${ms.length} ${L.units}</small></h3><div class="hbar">${rows.map(([n,f])=>{const a=ms.filter(f);return `<div class="row"><span>${n}</span><div class="track">${['Complete','Test','Stock','Broken'].map(k=>{const v=a.filter(m=>m.status===k).length;return v?`<i style="width:${v/a.length*100}%;background:var(${ST_C[k][0]})" title="${L.st[k]} ${v}"></i>`:''}).join('')}</div><b class="num r">${a.length}</b></div>`}).join('')}
-    <div class="lg" style="flex-direction:row;flex-wrap:wrap;gap:14px;font-size:13px">${['Complete','Test','Stock','Broken'].map(k=>`<span><i style="--c:var(${ST_C[k][0]})"></i>${L.st[k]} <b class="num" style="margin:0;padding:0">${ms.filter(m=>m.status===k).length}</b></span>`).join('')}</div></div></div></div>`;
+  h+=`<div class="card"><h3>${th?'สถานะเครื่องตามประเภท':'Fleet by type'}<small>${ms.length} ${L.units}</small></h3><div class="hbar">${rows.map(([n,f])=>{const a=ms.filter(f);return `<div class="row"><span>${n}</span><div class="track">${['Complete','Test','Stock','Broken'].map(k=>{const v=a.filter(m=>m.status===k).length;return v?`<i style="width:${v/a.length*100}%;background:var(${ST_C[k][0]})" title="${L.st[k]} ${v}"></i>`:''}).join('')}</div><b class="num r">${a.length}</b></div>`}).join('')}
+    <div class="lg" style="flex-direction:row;flex-wrap:wrap;gap:14px;font-size:13px">${['Complete','Test','Stock','Broken'].map(k=>`<span><i style="--c:var(${ST_C[k][0]})"></i>${L.st[k]} <b class="num" style="margin:0;padding:0">${st(k)}</b></span>`).join('')}</div></div></div></div>`;
   // follow up
   const it=(sn,t,s,r)=>`<div class="it" data-open="${sn}"><div class="bd"><b>${esc(t)}</b><small>${s}</small></div>${r}</div>`;
   h+=`<div class="d2"><div class="card"><h3>${L===T.th?'รอพิจารณา — ต้องติดตาม':'Pending — follow up'}<small>${pd.length}</small></h3><div class="list">${pd.sort((a,b)=>a.end.localeCompare(b.end)).map(x=>it(x.sn,x.client,`${esc(x.sn)} · ${L===T.th?'จบทดลอง':'ended'} ${fmtD(x.end)}${x.remark?' · '+esc(x.remark):''}`,`<span class="big num" style="color:var(--pend)">${days(x.end)}<small style="font-size:12px;font-weight:400"> ${L.days}</small></span>`)).join('')||`<div class="empty">—</div>`}</div></div>
@@ -144,6 +152,10 @@ function vDash(){
 }
 
 /* ---------- drawer ---------- */
+function swapLine(x){if(!x.swapRef)return '';const p=S.hist.find(h=>h.id===x.swapRef),th=L===T.th;if(!p)return '';
+  return x.result==='Swapped'
+    ?`<div class="swl">🔁 ${th?'ลูกค้ารับเครื่องใหม่':'Received new unit'} <button class="linkbtn" data-open="${esc(p.sn)}">${esc(p.sn)}</button> ${th?'แทนเครื่องนี้':'instead'} · ${fmtD(p.end||p.start)}</div>`
+    :`<div class="swl">🔁 ${th?'รับแทนเครื่องที่ทดลอง':'Replaces trial unit'} <button class="linkbtn" data-open="${esc(p.sn)}">${esc(p.sn)}</button></div>`}
 function drawer(){
   const m=M(UI.open); if(!m){closeDrawer();return}
   const hs=S.hist.filter(h=>h.sn===m.sn).sort((a,b)=>b.start.localeCompare(a.start)), ot=openTrial(m.sn), th=L===T.th;
@@ -153,7 +165,8 @@ function drawer(){
     body+=`<div class="qa">${ot?`<button class="btn pri" data-act="closeTrial" data-v="${m.sn}">${th?'ปิดการทดลอง':'End trial'}</button>`:`<button class="btn pri" data-act="startTrial" data-v="${m.sn}">${th?'เริ่มทดลองกับลูกค้า':'Start a trial'}</button>`}
       <button class="btn" data-act="editMachine">${th?'แก้ไขข้อมูลเครื่อง':'Edit machine'}</button>
       ${m.status==='Broken'?`<button class="btn" data-act="quickStatus" data-v="Stock">${th?'ซ่อมเสร็จ · กลับเข้าคลัง':'Repaired · back to stock'}</button>`:m.status!=='Complete'?`<button class="btn danger" data-act="quickStatus" data-v="Broken">${th?'ส่งซ่อม':'Send to repair'}</button>`:''}
-      <button class="btn" data-act="addHist">${th?'เพิ่มประวัติเอง':'Add history'}</button></div>`;
+      <button class="btn" data-act="addHist">${th?'เพิ่มประวัติเอง':'Add history'}</button>
+      ${ot&&!ot.swapRef?`<button class="btn swapbtn" data-act="swap" data-v="${esc(ot.id)}">🔁 ${th?'ลูกค้าซื้อ · ขอเครื่องใหม่':'Bought · wants a new unit'}</button>`:''}</div>`;
   }
   if(UI.form) body+=formHtml(m,hs,ot);
   if(!UI.admin) body+=`<div class="lock"><svg class="ms" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>${th?'ดูอย่างเดียว · แก้ไขได้เมื่อเข้าสู่ระบบ Admin':'View only · log in as Admin to edit'}<button class="btn sm" data-act="admin">${th?'เข้าสู่ระบบ':'Log in'}</button></div>`;
@@ -164,7 +177,8 @@ function drawer(){
     <div><dt>${th?'วันส่งมอบ':'Delivered'}</dt><dd>${fmtD(m.deliv)}</dd></div><div><dt>${th?'ใช้งานมา':'In use'}</dt><dd>${m.deliv?useDays(m)+' '+L.days:'–'}</dd></div></dl></div>`;
   body+=`<div class="card"><h3>${th?'ประวัติการทดลอง':'Trial history'}<small>${hs.length} ${th?'ครั้ง':'records'}</small></h3>${hs.length?`<ul class="tl">${hs.map(x=>{const open=x.status==='In Progress', c=open?'--test':RS_C[x.result][0];
     return `<li style="--c:var(${c})"><div class="tc"><div class="th"><b>${esc(x.client)}</b>${open?pill(L.st.Test,ST_C.Test):rsPill(x.result)}${UI.admin?`<span class="acts"><button class="btn sm ghost" data-act="editHist" data-v="${esc(x.id)}" aria-label="แก้ไข">${th?'แก้ไข':'Edit'}</button><button class="btn sm ghost" style="color:var(--broken)" data-act="delHist" data-v="${esc(x.id)}" aria-label="ลบ">${th?'ลบ':'Delete'}</button></span>`:''}</div>
-      <div class="per">${esc(x.loc)} · ${esc(x.mode)} · ${fmtD(x.start)} – ${open?(th?'ปัจจุบัน':'now'):fmtD(x.end)} · <b class="num">${days(x.start,open?'':x.end)} ${L.days}</b></div>${x.remark?`<div class="rm">${esc(x.remark)}</div>`:''}</div></li>`}).join('')}</ul>`:`<div class="empty" style="padding:16px">${th?'ยังไม่เคยทดลอง':'No trials yet'}</div>`}</div>`;
+      <div class="per">${esc(x.loc)} · ${esc(x.mode)} · ${fmtD(x.start)} – ${open?(th?'ปัจจุบัน':'now'):fmtD(x.end)} · <b class="num">${days(x.start,open?'':x.end)} ${L.days}</b></div>${swapLine(x)}${x.remark?`<div class="rm">${esc(x.remark)}</div>`:''}
+      ${UI.admin&&!x.swapRef&&(open||x.result==='Pending')?`<button class="btn sm swapbtn" data-act="swap" data-v="${esc(x.id)}">🔁 ${th?'ลูกค้าซื้อ · ขอเครื่องใหม่':'Bought · wants a new unit'}</button>`:''}</div></li>`}).join('')}</ul>`:`<div class="empty" style="padding:16px">${th?'ยังไม่เคยทดลอง':'No trials yet'}</div>`}</div>`;
   setTimeout(updEffect,0);
   $('#drawer').innerHTML=`<div class="dh"><div class="t"><h2 class="num">${esc(m.sn)}</h2><div>${stPill(m.status)}<span class="tag">${esc(m.type)}</span><span class="tag">${esc(m.mode)}</span><span class="tag">${esc(m.model)}</span></div></div><button class="iconbtn" data-act="close" aria-label="ปิด">✕</button></div><div class="db">${body}</div>`;
 }
@@ -211,7 +225,25 @@ function formOp(m){const f=UI.form,ot=openTrial(m.sn);
   if(f.kind==='close')return {kind:'edit',id:ot.id,rec:{status:'Completed',result:f.result,end:val('ff-end')||TODAY}};
   const rec={client:val('ff-client'),loc:val('ff-loc'),mode:val('ff-mode'),start:val('ff-start'),end:val('ff-end'),status:val('ff-status'),result:val('ff-result')};
   return f.id?{kind:'edit',id:f.id,rec}:{kind:'add',autoClose:rec.status==='In Progress'&&!!ot,rec}}
-function updEffect(){const box=$('#ff-eff');if(!box||!UI.form||!UI.open)return;const m=M(UI.open),f=UI.form;
+function swapPlan(m){const f=UI.form,x=S.hist.find(h=>h.id===f.recId),toSn=val('sw-to'),date=val('sw-date')||TODAY,B=toSn&&M(toSn);
+  const norm=v=>String(v||'').trim();
+  const link=B?S.hist.find(h=>h.sn===B.sn&&isBought(h)&&!h.swapRef&&norm(h.client)===norm(x.client)):null;
+  const useLink=!!link&&(!$('#sw-linkck')||$('#sw-linkck').checked);
+  return {x,toSn,date,B,link,useLink}}
+function updSwap(){const m=M(UI.open),th=L===T.th,P=swapPlan(m);if(!P.x)return;
+  $('#sw-bsn').textContent=P.toSn||'—';
+  $('#sw-link').innerHTML=P.link?`<label class="ck synck"><input type="checkbox" id="sw-linkck" ${P.useLink?'checked':''}><span><b>${th?'เชื่อมกับรายการ "ซื้อ" ที่มีอยู่แล้วในเครื่องใหม่':'Link to the existing purchase record'}</b><span class="hint" style="display:block">${esc(P.link.client)} · ${fmtD(P.link.end||P.link.start)} — ${th?'ไม่สร้างรายการซ้ำ ไม่เปลี่ยนข้อมูลเครื่องใหม่':'no duplicate, new unit untouched'}</span></span></label>`:'';
+  // เครื่องที่ทดลอง: กลับคลังเฉพาะเมื่อยังอยู่กับลูกค้ารายนี้ (สถานะ Test) · ถ้าขายให้รายอื่นไปแล้ว ไม่แตะ
+  const effA=m.status==='Test'?effectHtml(m,simulate(m,{kind:'edit',id:P.x.id,rec:{status:'Completed',result:'Swapped',end:P.x.end||P.date}}),true,false,true)
+    :`<div class="eff mute">🗂 <span>${th?`เครื่องนี้${m.status==='Complete'?'ขายให้ลูกค้ารายอื่นแล้ว':'ไม่ได้อยู่กับลูกค้ารายนี้'} → <b>ไม่เปลี่ยนข้อมูลเครื่อง</b> (บันทึกผลในประวัติอย่างเดียว)`:'Not with this client → machine untouched'}</span></div>`;
+  $('#sw-effA').innerHTML=effA;
+  let effB;
+  if(!P.B)effB=`<div class="eff info">ℹ️ <span>${th?'เลือกเครื่องใหม่ที่ลูกค้าได้รับ':'Choose the new unit'}</span></div>`;
+  else if(P.useLink)effB=`<div class="eff mute">🔗 <span>${th?'เชื่อมรายการเดิม · <b>ไม่เปลี่ยนข้อมูลเครื่อง</b>':'Linked · machine untouched'}</span></div>`;
+  else{const sim=simulate(P.B,{kind:'add',rec:{client:P.x.client,loc:val('sw-loc')||P.x.loc,mode:P.B.mode,start:P.date,end:P.date,status:'Completed',result:'Bought'}});
+    effB=effectHtml(P.B,sim,true,false,P.B.status!=='Complete')+(P.B.status!=='Stock'&&P.B.status!=='Complete'?`<div class="eff bad" style="margin-top:6px">⚠️ <span>${th?`เครื่องนี้สถานะ "${L.st[P.B.status]}" อยู่ — ตรวจให้แน่ใจว่าเลือกเครื่องถูก`:'This unit is not in stock — double-check'}</span></div>`:'')}
+  $('#sw-effB').innerHTML=effB}
+function updEffect(){if(UI.form&&UI.form.kind==='swap'){updSwap();return}const box=$('#ff-eff');if(!box||!UI.form||!UI.open)return;const m=M(UI.open),f=UI.form;
   const sim=simulate(m,formOp(m)),ck=$('#ff-sync');
   if(ck){if(!f.syncTouched)ck.checked=sim.current;ck.disabled=!sim.current;$('#ff-synclab').classList.toggle('dis',!sim.current)}
   box.innerHTML=effectHtml(m,sim,ck?ck.checked:true,f.kind==='close'&&!f.result,!ck)}
@@ -239,6 +271,20 @@ function formHtml(m,hs,ot){
     <div class="f"><label>${th?'สถานะการทดลอง':'Trial status'}</label><select id="ff-status"><option value="In Progress" ${x.status==='In Progress'?'selected':''}>${L.st.Test}</option><option value="Completed" ${x.status==='Completed'?'selected':''}>${th?'จบแล้ว':'Finished'}</option></select></div>
     <div class="f"><label>${th?'ผล':'Result'}</label><select id="ff-result">${['Pending','Bought','Not Bought'].map(k=>`<option value="${k}" ${(x.result||'Pending')===k?'selected':''}>${L.res[k]}</option>`).join('')}</select></div>
     <div class="f full"><label>${th?'หมายเหตุ':'Remark'}</label><input id="ff-rm" value="${esc(x.remark||'')}"></div></div>${syncCk}${acts('saveHist')}</div>`;}
+  if(f.kind==='swap'){const x=S.hist.find(h=>h.id===f.recId);if(!x)return '';
+    const cand=S.machines.filter(t=>t.sn!==m.sn).sort((a,b)=>(a.status==='Stock'?0:1)-(b.status==='Stock'?0:1)||(a.mode===x.mode?0:1)-(b.mode===x.mode?0:1)||a.sn.localeCompare(b.sn));
+    const def=f.toSn||(cand.find(t=>t.status==='Stock')||{}).sn||'';
+    const opt=t=>`<option value="${esc(t.sn)}" ${t.sn===def?'selected':''}>${esc(t.sn)} · ${esc(t.model)} · ${esc(t.mode)} · ${esc(t.type)} · ${esc(L.st[t.status]||t.status)}${t.client?' · '+esc(t.client):''}</option>`;
+    const stock=cand.filter(t=>t.status==='Stock'),other=cand.filter(t=>t.status!=='Stock');
+    return `<div class="form"><h4>🔁 ${th?'ลูกค้าซื้อ · ขอเครื่องใหม่':'Bought · new unit'} · ${esc(x.client)}</h4>
+    <div class="note info">${th?'ใช้เมื่อลูกค้าตกลงซื้อ แต่ขอรับเครื่องใหม่แทนเครื่องที่ทดลอง (เครื่อง demo) · เครื่องที่ทดลองกลับเข้าคลังเพื่อขายต่อ · นับเป็นลูกค้าซื้อ 1 ครั้ง':'Customer buys but receives a new unit; the demo unit returns to stock.'}</div>
+    <div class="fg"><div class="f full"><label for="sw-to">${th?'เครื่องใหม่ที่ลูกค้าได้รับ *':'New unit *'}</label><select id="sw-to"><option value="">${th?'— เลือกเครื่อง —':'— choose —'}</option>${stock.length?`<optgroup label="${th?'ในคลัง':'In stock'}">${stock.map(opt).join('')}</optgroup>`:''}${other.length?`<optgroup label="${th?'สถานะอื่น':'Other'}">${other.map(opt).join('')}</optgroup>`:''}</select></div>
+    <div class="f"><label for="sw-date">${th?'วันส่งมอบเครื่องใหม่':'Delivery date'}</label><input type="date" id="sw-date" value="${f.date||(x.status==='In Progress'?TODAY:(x.end||TODAY))}"></div>
+    <div class="f"><label for="sw-loc">${th?'สถานที่ติดตั้ง':'Location'}</label><input id="sw-loc" value="${esc(f.loc||x.loc||'')}"></div>
+    <div class="f full"><label for="sw-rm">${th?'หมายเหตุ':'Remark'}</label><input id="sw-rm" value="${esc(f.remark||'')}" placeholder="${th?'เช่น ลูกค้าขอเครื่องใหม่ ไม่เอาเครื่อง demo':'optional'}"></div></div>
+    <div id="sw-link"></div>
+    <div class="swprev"><div><div class="swh">${th?'เครื่องที่ทดลอง':'Trial unit'} <b class="num">${esc(m.sn)}</b></div><div id="sw-effA"></div></div><div><div class="swh">${th?'เครื่องใหม่':'New unit'} <b class="num" id="sw-bsn">—</b></div><div id="sw-effB"></div></div></div>
+    ${acts('saveSwap')}</div>`;}
   if(f.kind==='machine') return `<div class="form"><h4>${th?'แก้ไขข้อมูลเครื่อง':'Edit machine'}</h4>
     <div class="fg"><div class="f"><label>${th?'ลูกค้าปัจจุบัน':'Client'}</label><input id="mf-client" value="${esc(m.client)}"></div><div class="f"><label>${th?'สถานที่':'Location'}</label><input id="mf-loc" value="${esc(m.loc)}"></div>
     <div class="f"><label>${th?'สถานะ':'Status'}</label><select id="mf-status">${['Stock','Test','Complete','Broken'].map(k=>`<option value="${k}" ${m.status===k?'selected':''}>${L.st[k]}</option>`).join('')}</select></div>
@@ -303,7 +349,8 @@ document.addEventListener('change',e=>{const t=e.target;
   if(t.closest&&t.closest('#drawer .form'))updEffect()});
 document.addEventListener('input',e=>{if(e.target.id==='ff-sync'&&UI.form)UI.form.syncTouched=true;if(e.target.closest&&e.target.closest('#drawer .form'))updEffect()});
 function setLang(l){UI.lang=l;L=T[l];try{localStorage.setItem(LANG_KEY,l)}catch(e){}render(true);toast(l==='th'?'เปลี่ยนเป็นภาษาไทย':'Switched to English')}
-function act(a,v){
+function act(a,v,e){
+  UI.lastBtn=e&&e.target&&e.target.closest?e.target.closest('[data-act]'):null;
   const th=L===T.th;
   if(a==='close'){closeDrawer();return}
   if(a==='lang'){setLang(UI.lang==='th'?'en':'th');return}
@@ -317,6 +364,7 @@ function act(a,v){
   const m=UI.open&&M(UI.open);
   if(a==='startTrial'){if(UI.open!==v)openDrawer(v);UI.form={kind:'start'};drawer();$('#drawer .db').scrollTop=0;return}
   if(a==='closeTrial'){if(UI.open!==v)openDrawer(v);UI.form={kind:'close',result:''};drawer();$('#drawer .db').scrollTop=0;return}
+  if(a==='swap'){UI.form={kind:'swap',recId:v};drawer();$('#drawer .db').scrollTop=0;return}
   if(a==='editMachine'){UI.form={kind:'machine'};drawer();$('#drawer .db').scrollTop=0;return}
   if(a==='addHist'){UI.form={kind:'hist'};drawer();$('#drawer .db').scrollTop=0;return}
   if(a==='editHist'){UI.form={kind:'hist',id:v};drawer();$('#drawer .db').scrollTop=0;return}
@@ -339,6 +387,9 @@ function act(a,v){
     if(UI.form.id) save('edit',{...histPayload({...d,id:UI.form.id}),syncMachineStatus:syncOn},th?'แก้ไขประวัติแล้ว':'Saved');
     else { const p=histPayload(d); delete p.ID; p.autoCloseOldTrials=d.status==='In Progress'&&!!openTrial(m.sn); p.syncMachineStatus=syncOn; save('add',p,th?'เพิ่มประวัติแล้ว':'Added'); }
     return}
+  if(a==='saveSwap'){const P=swapPlan(m);if(!P.toSn){toast(th?'เลือกเครื่องใหม่ก่อน':'Choose the new unit');return}
+    if(P.x.start&&P.date<P.x.start){toast(th?'วันส่งมอบต้องไม่ก่อนวันเริ่มทดลอง':'Date is before the trial start');return}
+    save('swap',{fromId:P.x.id,fromSn:m.sn,toSn:P.toSn,date:P.date,location:val('sw-loc')||P.x.loc,remark:val('sw-rm'),linkId:P.useLink?P.link.id:''},th?`บันทึกแล้ว · ลูกค้ารับเครื่อง ${P.toSn}`:'Saved');return}
   if(a==='saveMachine'){save('edit_machine',{"S/N Analyzer":m.sn,"Client name":val('mf-client'),"Location":val('mf-loc'),"Status":val('mf-status'),"Model":val('mf-model'),"Mode":val('mf-mode'),"Type":val('mf-type'),"S/N Edge server":val('mf-edge'),"Delivery date":val('mf-deliv')},th?'แก้ไขข้อมูลเครื่องแล้ว':'Machine updated');return}
 }
 function updDelEffect(){const box=$('#del-eff');if(!box||!UI.del)return;const ck=$('#del-sync');box.innerHTML=effectHtml(M(UI.open),UI.del.sim,!!(ck&&ck.checked))}
@@ -356,14 +407,20 @@ async function login(){const th=L===T.th,pw=val('pw'),btn=$('#loginBtn'),err=$('
     if(j.status!=='success'){err.textContent=j.message||(th?'รหัสผ่านไม่ถูกต้อง':'Wrong password');btn.disabled=false;btn.textContent=th?'เข้าสู่ระบบ':'Log in';return}
     UI.pw=pw;UI.admin=true;closeModal();render(true);toast(th?'เข้าสู่โหมด Admin แล้ว':'Admin mode on');
   }catch(e){err.textContent=th?'เชื่อมต่อไม่ได้ ลองใหม่อีกครั้ง':'Connection failed';btn.disabled=false;btn.textContent=th?'เข้าสู่ระบบ':'Log in'}}
-function setBusy(b){UI.busy=b;$('#drawer').classList.toggle('busy',b);renderSync()}
+// ระหว่างบันทึก: ปุ่มที่กดหมุน + ขึ้นข้อความ · แผงด้านขวากดซ้ำไม่ได้ · แถบ "กำลังบันทึก…" ด้านบนจอ (เห็นทั้งคอมและมือถือ)
+function setBusy(b,label){UI.busy=b;$('#drawer').classList.toggle('busy',b);
+  const bar=$('#busy');bar.querySelector('span').textContent=label||(L===T.th?'กำลังบันทึก…':'Saving…');bar.classList.toggle('on',b);
+  const btn=UI.lastBtn;
+  if(b&&btn&&btn.isConnected&&btn.tagName==='BUTTON'){btn.dataset.txt=btn.innerHTML;btn.classList.add('loading');btn.disabled=true;btn.innerHTML=`<i class="spin-ic" aria-hidden="true"></i>${L===T.th?'กำลังบันทึก…':'Saving…'}`;UI.busyBtn=btn}
+  if(!b&&UI.busyBtn){const x=UI.busyBtn;if(x.isConnected){x.innerHTML=x.dataset.txt;x.classList.remove('loading');x.disabled=false}UI.busyBtn=null}
+  renderSync()}
 async function save(action,data,okMsg){const th=L===T.th;if(UI.busy)return;
   setBusy(true);
   try{const j=await api(action,data,UI.pw);
     if(j.status!=='success'){const msg=j.message||(th?'บันทึกไม่สำเร็จ':'Save failed');
       if(/รหัสผ่าน|ล็อก|Admin/.test(msg)){UI.admin=false;UI.pw='';UI.form=null}
       setBusy(false);render(true);modal(`<h3>${th?'บันทึกไม่สำเร็จ':'Save failed'}</h3><p>${esc(msg)}</p><div class="fa"><button class="btn pri" data-act="mclose">${th?'ตกลง':'OK'}</button></div>`);return}
-    UI.form=null;setBusy(false);await load();toast(j.message||okMsg);
+    UI.form=null;$('#busy span').textContent=th?'บันทึกแล้ว · กำลังอัปเดตข้อมูล…':'Saved · refreshing…';await load();setBusy(false);toast(j.message||okMsg);
   }catch(e){setBusy(false);modal(`<h3>${th?'เชื่อมต่อไม่ได้':'Connection failed'}</h3><p>${th?'ยังไม่ได้บันทึก กรุณาลองใหม่อีกครั้ง':'Nothing was saved. Please try again.'}</p><div class="fa"><button class="btn pri" data-act="mclose">${th?'ตกลง':'OK'}</button></div>`)}}
 function renderSync(){const th=L===T.th;
   const t=UI.busy?(th?'กำลังบันทึก…':'Saving…'):UI.syncing?(th?'กำลังซิงค์…':'Syncing…'):'';

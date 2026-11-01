@@ -296,7 +296,7 @@ tbody tr:last-child td{border-bottom:0}
   .fg{grid-template-columns:1fr}
   .sel{max-width:none;flex:1 1 140px}
 }
-.drawer.busy .db{pointer-events:none;opacity:.6;transition:opacity .2s}
+.drawer.busy .db{pointer-events:none;opacity:.8;transition:opacity .2s}
 #ldErr[hidden]{display:none}
 .demo{display:none}
 .note[hidden]{display:none}
@@ -317,3 +317,27 @@ tbody tr:last-child td{border-bottom:0}
 .eff i{color:var(--mute)}
 .eff .ef{font-size:12.5px}
 .mbox .synck{margin-top:2px}
+/* ---------- สลับเครื่อง ---------- */
+.swapbtn{color:var(--brand-ink);border-color:color-mix(in srgb,var(--brand) 40%,var(--line))}
+.tc .swapbtn{margin-top:8px}
+.swl{font-size:13px;margin-top:6px;color:var(--brand-ink);background:var(--tint);border-radius:6px;padding:4px 8px;display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.swprev{display:grid;grid-template-columns:1fr;gap:10px}
+.swprev .swh{font-size:12.5px;color:var(--sub);margin-bottom:4px}
+@media (max-width:820px){.swprev{grid-template-columns:1fr}}
+.dsec h2{margin:4px 0 8px;font-size:17px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.dsec h2 small{font-size:12.5px;font-weight:400;color:var(--mute)}
+.dgrid.d5{grid-template-columns:repeat(5,minmax(0,1fr))}
+.kpi b u{text-decoration:none;font-size:13px;font-weight:500;color:var(--sub);margin-left:4px}
+@media (max-width:1080px){.dgrid.d5{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:820px){.dgrid.d5{grid-template-columns:repeat(2,minmax(0,1fr))}}
+/* ---------- สถานะกำลังบันทึก ---------- */
+.spin-ic{display:inline-block;width:16px;height:16px;border:2.5px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .75s linear infinite;flex:none}
+.btn.loading{cursor:progress;opacity:.9}
+.btn.loading:disabled{filter:none}
+.busytag{position:fixed;left:50%;top:14px;transform:translate(-50%,-80px);z-index:80;background:var(--brand-ink);color:#fff;border-radius:30px;padding:9px 16px;display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.2);transition:transform .25s ease;pointer-events:none}
+:root[data-theme="dark"] .busytag{background:#2E4A3B}
+.busytag.on{transform:translate(-50%,0)}
+.drawer.busy .db{position:relative}
+.drawer.busy .db::before{content:"";position:sticky;top:0;display:block;height:3px;margin:-16px -18px 13px;background:linear-gradient(90deg,transparent,var(--brand),transparent);background-size:50% 100%;background-repeat:no-repeat;animation:busybar 1s linear infinite;z-index:2}
+@keyframes busybar{from{background-position:-50% 0}to{background-position:150% 0}}
+@media (prefers-reduced-motion: reduce){.spin-ic,.drawer.busy .db::before{animation:none}}
