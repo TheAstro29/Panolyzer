@@ -36,7 +36,7 @@ const normResult=v=>{const x=String(v||'').trim();return x==='Bought'||x==='Not 
 function ingest(data){
   const ms=(Array.isArray(data)?data:(data.machines||[])).filter(r=>String(r["Type"]||'').toLowerCase()!=='sorter'&&String(r["S/N Analyzer"]||'').trim());
   S.machines=ms.map(r=>({sn:String(r["S/N Analyzer"]).trim(),edge:r["S/N Edge server"]||'',model:r["Model"]||'',mode:r["Mode"]||'',type:r["Type"]||'',
-    status:normStatus(r["Status"]),raw:String(r["Status"]||'').trim(),client:r["Client name"]||'',loc:r["Location"]||'',deliv:ymd(r["Delivery date"]),period:parseInt(r["Period"],10),pmDone:!!(r["PM1_Status"]||r["PM2_Status"]||r["PM3_Status"])}));
+    status:normStatus(r["Status"]),raw:String(r["Status"]||'').trim(),client:r["Client name"]||'',loc:r["Location"]||'',deliv:ymd(r["Delivery date"]),period:parseInt(r["Period"],10),pmDone:!!(r["PM1_Status"]||r["PM2_Status"]||r["PM3_Status"]),pm1:ymd(r["PM1_Date"])}));
   S.hist=(Array.isArray(data)?[]:(data.histories||[])).filter(h=>String(h["S/N Analyzer"]||'').trim()).map(h=>({id:String(h["ID"]),sn:String(h["S/N Analyzer"]).trim(),client:h["Client Name"]||'',loc:h["Location"]||'',
     start:ymd(h["Start Date"]),end:ymd(h["End Date"]),status:String(h["Status"]||'').trim()==='Completed'?'Completed':'In Progress',result:normResult(h["Result"]),remark:h["Remark"]||'',mode:h["Mode"]||''}));
 }
@@ -165,18 +165,60 @@ function drawer(){
   body+=`<div class="card"><h3>${th?'ประวัติการทดลอง':'Trial history'}<small>${hs.length} ${th?'ครั้ง':'records'}</small></h3>${hs.length?`<ul class="tl">${hs.map(x=>{const open=x.status==='In Progress', c=open?'--test':RS_C[x.result][0];
     return `<li style="--c:var(${c})"><div class="tc"><div class="th"><b>${esc(x.client)}</b>${open?pill(L.st.Test,ST_C.Test):rsPill(x.result)}${UI.admin?`<span class="acts"><button class="btn sm ghost" data-act="editHist" data-v="${esc(x.id)}" aria-label="แก้ไข">${th?'แก้ไข':'Edit'}</button><button class="btn sm ghost" style="color:var(--broken)" data-act="delHist" data-v="${esc(x.id)}" aria-label="ลบ">${th?'ลบ':'Delete'}</button></span>`:''}</div>
       <div class="per">${esc(x.loc)} · ${esc(x.mode)} · ${fmtD(x.start)} – ${open?(th?'ปัจจุบัน':'now'):fmtD(x.end)} · <b class="num">${days(x.start,open?'':x.end)} ${L.days}</b></div>${x.remark?`<div class="rm">${esc(x.remark)}</div>`:''}</div></li>`}).join('')}</ul>`:`<div class="empty" style="padding:16px">${th?'ยังไม่เคยทดลอง':'No trials yet'}</div>`}</div>`;
+  setTimeout(updEffect,0);
   $('#drawer').innerHTML=`<div class="dh"><div class="t"><h2 class="num">${esc(m.sn)}</h2><div>${stPill(m.status)}<span class="tag">${esc(m.type)}</span><span class="tag">${esc(m.mode)}</span><span class="tag">${esc(m.model)}</span></div></div><button class="iconbtn" data-act="close" aria-label="ปิด">✕</button></div><div class="db">${body}</div>`;
 }
 const optsKeep=(list,cur)=>{const c=String(cur||'').trim();return (c&&!list.includes(c)?`<option value="${esc(c)}" selected>${esc(c)} (${L===T.th?'ค่าเดิมในชีต':'current'})</option>`:'')+list.map(v=>`<option ${c===v?'selected':''}>${v}</option>`).join('')};
 // ปิดทดลองแบบ "ซื้อ": วันส่งมอบ = วันสิ้นสุดการทดลอง + นัด PM1-3 (+4/+8/+12 เดือน แบบเดียวกับ backend) ถ้ายังไม่เคยเข้า PM
 const addMonths=(s,n)=>{const d=D(s);d.setMonth(d.getMonth()+n);return ymdOf(d)};
-function buyNote(m,end){const th=L===T.th;if(!end)return th?'ใส่วันสิ้นสุดการทดลองเพื่อใช้เป็นวันส่งมอบ':'Set the end date — it becomes the delivery date';
-  if(m.pmDone)return th?`วันส่งมอบจะเปลี่ยนเป็น <b>${fmtD(end)}</b> · นัด PM เดิมไม่เปลี่ยน (เครื่องนี้เคยเข้า PM แล้ว)`:`Delivery date becomes ${fmtD(end)} · existing PM schedule kept`;
-  return th?`วันส่งมอบจะเป็น <b>${fmtD(end)}</b> (วันสิ้นสุดการทดลอง) · นัด PM1 <b>${fmtD(addMonths(end,4))}</b> · PM2 ${fmtD(addMonths(end,8))} · PM3 ${fmtD(addMonths(end,12))}`
-    :`Delivery date ${fmtD(end)} · PM1 ${fmtD(addMonths(end,4))} · PM2 ${fmtD(addMonths(end,8))} · PM3 ${fmtD(addMonths(end,12))}`}
+/* ---------- ทำนายผลกับข้อมูลเครื่อง ก่อนกดบันทึก (กฎเดียวกับ Code.gs) ----------
+   รายการที่ "กำหนดสถานะเครื่อง" = รายการที่กำลังทดลอง (ล่าสุด) ถ้าไม่มี = รายการที่วันเริ่มใหม่สุด */
+function curRec(list){if(!list.length)return null;const s=[...list].sort((a,b)=>(a.start||'').localeCompare(b.start||'')||a._o-b._o);const op=s.filter(h=>h.status==='In Progress');return op.length?op[op.length-1]:s[s.length-1]}
+function applySync(m,ref,setDel){const a={status:m.status,client:m.client||'',loc:m.loc||'',mode:m.mode||'',deliv:m.deliv||'',pm:null};
+  if(!ref){if(m.status==='Test'){a.status='Stock';a.client='';a.loc=''}return a}
+  if(ref.status==='In Progress'){a.status='Test';a.client=ref.client||'';a.loc=ref.loc||'';if(ref.mode)a.mode=ref.mode;return a}
+  if(ref.result==='Bought'){a.status='Complete';if(ref.client){a.client=ref.client;a.loc=ref.loc||''}
+    if(setDel&&ref.end){a.deliv=ref.end;if(!m.pmDone)a.pm=[addMonths(ref.end,4),addMonths(ref.end,8),addMonths(ref.end,12)]}return a}
+  a.status='Stock';a.client='';a.loc='';return a}
+// op: {kind:'add'|'edit'|'delete', id, rec, autoClose}
+function simulate(m,op){let hs=S.hist.filter(h=>h.sn===m.sn).map((h,i)=>({...h,_o:i}));
+  if(op.kind==='delete'){const b=curRec(hs),was=!!b&&b.id===op.id;hs=hs.filter(h=>h.id!==op.id);return was?{current:true,after:applySync(m,curRec(hs),false)}:{current:false}}
+  if(op.kind==='add'){if(op.autoClose)hs.forEach(h=>{if(h.status==='In Progress'){h.status='Completed';h.result='Not Bought';h.end=TODAY}});hs.push({...op.rec,id:'__new',_o:hs.length})}
+  else hs=hs.map(h=>h.id===op.id?{...h,...op.rec,id:op.id}:h);
+  const ref=curRec(hs),id=op.kind==='add'?'__new':op.id;
+  return ref&&ref.id===id?{current:true,after:applySync(m,ref,true)}:{current:false}}
+function effectHtml(m,sim,syncOn,needResult,plain){const th=L===T.th;
+  if(needResult)return `<div class="eff info">ℹ️ <span>${th?'เลือกผลการทดลอง แล้วระบบจะบอกว่าข้อมูลเครื่องจะเปลี่ยนอย่างไร':'Pick a result to preview the change'}</span></div>`;
+  if(!sim.current)return `<div class="eff mute">🗂 <span>${th?'รายการนี้ไม่ใช่รายการล่าสุดของเครื่อง → <b>ไม่กระทบข้อมูลเครื่อง</b>':'Not the latest record → machine data untouched'}</span></div>`;
+  if(!syncOn)return `<div class="eff mute">📝 <span>${th?'บันทึกประวัติอย่างเดียว · <b>ไม่แตะข้อมูลเครื่อง</b>':'History only · machine data untouched'}</span></div>`;
+  const A=sim.after,rows=[],nv=v=>v?esc(v):`<i>${th?'(ว่าง)':'(empty)'}</i>`;
+  const add=(k,b,a,bad,fmt)=>{if((b||'')!==(a||''))rows.push(`<tr class="${bad?'bad':''}"><th>${k}</th><td>${fmt?fmt(b):nv(b)}</td><td>→</td><td><b>${fmt?fmt(a):nv(a)}</b></td></tr>`)};
+  const stx=v=>v?esc(L.st[v]||v):nv('');
+  add(th?'สถานะ':'Status',m.status,A.status,m.status==='Complete'&&A.status!=='Complete',stx);
+  add(th?'ลูกค้า':'Client',m.client,A.client,!!m.client);
+  add(th?'สถานที่':'Location',m.loc,A.loc,false);
+  add('Mode',m.mode,A.mode,false);
+  add(th?'วันส่งมอบ':'Delivered',m.deliv,A.deliv,!!m.deliv,v=>v?fmtD(v):nv(''));
+  if(A.pm&&A.pm[0]!==m.pm1)rows.push(`<tr class="${m.pm1&&m.pm1!==A.pm[0]?'bad':''}"><th>${th?'นัด PM':'PM dates'}</th><td>${m.pm1?'PM1 '+fmtD(m.pm1):nv('')}</td><td>→</td><td><b>PM1 ${fmtD(A.pm[0])} · PM2 ${fmtD(A.pm[1])} · PM3 ${fmtD(A.pm[2])}</b></td></tr>`);
+  else if(m.pmDone&&A.deliv!==m.deliv)rows.push(`<tr><th>${th?'นัด PM':'PM dates'}</th><td colspan="3">${th?'คงเดิม (เครื่องนี้เคยเข้า PM แล้ว)':'kept (PM already done)'}</td></tr>`);
+  if(!rows.length)return `<div class="eff ok">✓ <span>${th?'ไม่มีผลกับข้อมูลเครื่อง (ข้อมูลตรงกันอยู่แล้ว)':'No change to machine data'}</span></div>`;
+  const bad=!plain&&rows.some(r=>r.includes('class="bad"'));
+  if(plain)rows.forEach((r,i)=>rows[i]=r.replace(' class="bad"',''));
+  return `<div class="eff ${bad?'bad':'info'}"><div class="eh">${bad?'⚠️ ':''}${th?'ถ้าบันทึก ข้อมูลเครื่องจะเปลี่ยน:':'Saving will change the machine:'}</div><table>${rows.join('')}</table>${bad?`<div class="ef">${th?'ถ้าไม่ต้องการให้เครื่องเปลี่ยน ให้เอาเครื่องหมายถูก "อัปเดตข้อมูลเครื่อง" ออก':'Untick “Update machine” to keep the machine as is'}</div>`:''}</div>`}
+// อ่านค่าจากฟอร์มปัจจุบัน → op สำหรับทำนาย
+function formOp(m){const f=UI.form,ot=openTrial(m.sn);
+  if(f.kind==='start')return {kind:'add',autoClose:!!ot,rec:{client:val('ff-client'),loc:val('ff-loc'),mode:val('ff-mode'),start:val('ff-start')||TODAY,end:'',status:'In Progress',result:'Pending'}};
+  if(f.kind==='close')return {kind:'edit',id:ot.id,rec:{status:'Completed',result:f.result,end:val('ff-end')||TODAY}};
+  const rec={client:val('ff-client'),loc:val('ff-loc'),mode:val('ff-mode'),start:val('ff-start'),end:val('ff-end'),status:val('ff-status'),result:val('ff-result')};
+  return f.id?{kind:'edit',id:f.id,rec}:{kind:'add',autoClose:rec.status==='In Progress'&&!!ot,rec}}
+function updEffect(){const box=$('#ff-eff');if(!box||!UI.form||!UI.open)return;const m=M(UI.open),f=UI.form;
+  const sim=simulate(m,formOp(m)),ck=$('#ff-sync');
+  if(ck){if(!f.syncTouched)ck.checked=sim.current;ck.disabled=!sim.current;$('#ff-synclab').classList.toggle('dis',!sim.current)}
+  box.innerHTML=effectHtml(m,sim,ck?ck.checked:true,f.kind==='close'&&!f.result,!ck)}
 function formHtml(m,hs,ot){
   const f=UI.form, th=L===T.th, today=TODAY;
-  const sync=`<div class="hint">${th?'ระบบอัปเดตสถานะเครื่องให้อัตโนมัติ: กำลังทดลอง → "กำลังทดลอง" · ซื้อ → "ขายแล้ว" + วันส่งมอบ = วันสิ้นสุดทดลอง · ไม่ซื้อ/รอพิจารณา → "ในคลัง" (ล้างชื่อลูกค้า) · แก้ประวัติเก่าย้อนหลังจะไม่เปลี่ยนสถานะเครื่อง':'Machine status updates automatically from the latest trial record.'}</div>`;
+  const sync=`<div id="ff-eff"></div>`;
+  const syncCk=`<label class="ck synck" id="ff-synclab"><input type="checkbox" id="ff-sync" checked><span><b>${th?'อัปเดตข้อมูลเครื่องตามรายการนี้':'Update machine from this record'}</b><span class="hint" style="display:block">${th?'เอาออก = บันทึกประวัติอย่างเดียว ไม่แตะสถานะ/ลูกค้า/วันส่งมอบของเครื่อง':'Untick to save history only'}</span></span></label><div id="ff-eff"></div>`;
   const acts=(save)=>`<div class="fa"><button class="btn" data-act="cancelForm">${th?'ยกเลิก':'Cancel'}</button><button class="btn pri" data-act="${save}">${th?'บันทึก':'Save'}</button></div>`;
   const resR=(cur)=>`<div class="radios">${['Bought','Not Bought','Pending'].map(k=>`<label style="--c:var(${RS_C[k][0]});--b:var(${RS_C[k][1]})"><input type="radio" name="ff-res" value="${k}" ${cur===k?'checked':''}>${L.res[k]}</label>`).join('')}</div>`;
   if(f.kind==='start') return `<div class="form"><h4>${th?'เริ่มทดลองกับลูกค้า':'Start a trial'}</h4>
@@ -188,7 +230,6 @@ function formHtml(m,hs,ot){
     <div class="f full"><label>${th?'หมายเหตุ':'Remark'}</label><input id="ff-rm" value="${esc(f.remark||'')}" placeholder="${th?'ไม่บังคับ':'optional'}"></div></div>${sync}${acts('saveStart')}</div>`;
   if(f.kind==='close') return `<div class="form"><h4>${th?'ปิดการทดลอง':'End trial'} · ${esc(ot.client)}</h4><div class="note info">${th?`ทดลองมาแล้ว ${days(ot.start)} วัน (เริ่ม ${fmtD(ot.start)})`:`Running ${days(ot.start)} days`}</div>
     <div class="f"><label>${th?'ผลการทดลอง *':'Result *'}</label>${resR(f.result)}</div>
-    <div class="note info" id="ff-buy" ${f.result==='Bought'?'':'hidden'}>📦 <span>${buyNote(m,f.end||TODAY)}</span></div>
     <div class="fg"><div class="f"><label>${th?'วันสิ้นสุดทดลอง':'End date'}</label><input type="date" id="ff-end" value="${f.end||today}"></div>
     <div class="f"><label>${th?'หมายเหตุ / เหตุผล':'Remark'}</label><input id="ff-rm" value="${esc(f.remark||ot.remark||'')}" placeholder="${th?'เช่น งบไม่พอ, รอใบเสนอราคา':'e.g. budget'}"></div></div>${sync}${acts('saveClose')}</div>`;
   if(f.kind==='hist'){ const x=f.id?S.hist.find(h=>h.id===f.id):{}; return `<div class="form"><h4>${f.id?(th?'แก้ไขประวัติ':'Edit history'):(th?'เพิ่มประวัติเอง':'Add history')}</h4>
@@ -197,7 +238,7 @@ function formHtml(m,hs,ot){
     <div class="f"><label>${th?'วันเริ่ม':'Start'}</label><input type="date" id="ff-start" value="${x.start||TODAY}"></div><div class="f"><label>${th?'วันสิ้นสุด':'End'}</label><input type="date" id="ff-end" value="${x.end||''}"></div>
     <div class="f"><label>${th?'สถานะการทดลอง':'Trial status'}</label><select id="ff-status"><option value="In Progress" ${x.status==='In Progress'?'selected':''}>${L.st.Test}</option><option value="Completed" ${x.status==='Completed'?'selected':''}>${th?'จบแล้ว':'Finished'}</option></select></div>
     <div class="f"><label>${th?'ผล':'Result'}</label><select id="ff-result">${['Pending','Bought','Not Bought'].map(k=>`<option value="${k}" ${(x.result||'Pending')===k?'selected':''}>${L.res[k]}</option>`).join('')}</select></div>
-    <div class="f full"><label>${th?'หมายเหตุ':'Remark'}</label><input id="ff-rm" value="${esc(x.remark||'')}"></div></div>${sync}${acts('saveHist')}</div>`;}
+    <div class="f full"><label>${th?'หมายเหตุ':'Remark'}</label><input id="ff-rm" value="${esc(x.remark||'')}"></div></div>${syncCk}${acts('saveHist')}</div>`;}
   if(f.kind==='machine') return `<div class="form"><h4>${th?'แก้ไขข้อมูลเครื่อง':'Edit machine'}</h4>
     <div class="fg"><div class="f"><label>${th?'ลูกค้าปัจจุบัน':'Client'}</label><input id="mf-client" value="${esc(m.client)}"></div><div class="f"><label>${th?'สถานที่':'Location'}</label><input id="mf-loc" value="${esc(m.loc)}"></div>
     <div class="f"><label>${th?'สถานะ':'Status'}</label><select id="mf-status">${['Stock','Test','Complete','Broken'].map(k=>`<option value="${k}" ${m.status===k?'selected':''}>${L.st[k]}</option>`).join('')}</select></div>
@@ -256,9 +297,11 @@ document.addEventListener('input',e=>{const t=e.target;
   if(t.id==='q2'){UI.q2=t.value;clearTimeout(UI.qt);UI.qt=setTimeout(()=>{render(true);const q=$('#q2');q.focus();q.setSelectionRange(q.value.length,q.value.length)},180)}});
 document.addEventListener('change',e=>{const t=e.target;
   if(t.id==='fClient'){UI.clientF=t.value;render(true)} if(t.id==='fMode'){UI.modeF=t.value;render(true)}
-  if(t.name==='ff-res'&&UI.form){UI.form.result=t.value;updBuy()}
-  if(t.id==='ff-end'&&UI.form&&UI.form.kind==='close'){UI.form.end=t.value;updBuy()}});
-function updBuy(){const el=$('#ff-buy');if(!el)return;el.hidden=UI.form.result!=='Bought';el.querySelector('span').innerHTML=buyNote(M(UI.open),val('ff-end'))}
+  if(t.name==='ff-res'&&UI.form){UI.form.result=t.value}
+  if(t.id==='ff-sync'&&UI.form){UI.form.syncTouched=true}
+  if(t.id==='del-sync'){updDelEffect()}
+  if(t.closest&&t.closest('#drawer .form'))updEffect()});
+document.addEventListener('input',e=>{if(e.target.id==='ff-sync'&&UI.form)UI.form.syncTouched=true;if(e.target.closest&&e.target.closest('#drawer .form'))updEffect()});
 function setLang(l){UI.lang=l;L=T[l];try{localStorage.setItem(LANG_KEY,l)}catch(e){}render(true);toast(l==='th'?'เปลี่ยนเป็นภาษาไทย':'Switched to English')}
 function act(a,v){
   const th=L===T.th;
@@ -278,8 +321,10 @@ function act(a,v){
   if(a==='addHist'){UI.form={kind:'hist'};drawer();$('#drawer .db').scrollTop=0;return}
   if(a==='editHist'){UI.form={kind:'hist',id:v};drawer();$('#drawer .db').scrollTop=0;return}
   if(a==='cancelForm'){UI.form=null;drawer();return}
-  if(a==='delHist'){const x=S.hist.find(h=>h.id===v);if(!x)return;modal(`<h3>${th?'ลบประวัตินี้?':'Delete this record?'}</h3><p>${esc(x.client)} · ${fmtD(x.start)} – ${x.end?fmtD(x.end):'…'}<br>${th?'ลบแล้วกู้คืนไม่ได้':'This cannot be undone'}${x.status==='In Progress'?`<br><b style="color:var(--test)">${th?'รายการนี้กำลังทดลองอยู่ — สถานะเครื่องจะปรับตามประวัติที่เหลือ':'This trial is active — machine status will follow the remaining history'}</b>`:''}</p><div class="fa"><button class="btn" data-act="mclose">${th?'ยกเลิก':'Cancel'}</button><button class="btn danger" data-act="delOk" data-v="${esc(x.id)}">${th?'ลบ':'Delete'}</button></div>`);return}
-  if(a==='delOk'){closeModal();save('delete',{ID:v},th?'ลบประวัติแล้ว':'Deleted');return}
+  if(a==='delHist'){const x=S.hist.find(h=>h.id===v);if(!x)return;UI.del={id:x.id,sim:simulate(m,{kind:'delete',id:x.id})};
+    modal(`<h3>${th?'ลบประวัตินี้?':'Delete this record?'}</h3><p>${esc(x.client)} · ${fmtD(x.start)} – ${x.end?fmtD(x.end):'…'}<br>${th?'ลบแล้วกู้คืนไม่ได้':'This cannot be undone'}</p>
+      <label class="ck synck ${UI.del.sim.current?'':'dis'}"><input type="checkbox" id="del-sync" ${UI.del.sim.current?'checked':'disabled'}><span><b>${th?'ปรับข้อมูลเครื่องตามประวัติที่เหลือ':'Update machine from remaining history'}</b></span></label><div id="del-eff"></div><div class="fa"><button class="btn" data-act="mclose">${th?'ยกเลิก':'Cancel'}</button><button class="btn danger" data-act="delOk" data-v="${esc(x.id)}">${th?'ลบ':'Delete'}</button></div>`);updDelEffect();return}
+  if(a==='delOk'){const ck=$('#del-sync'),rs=!!(ck&&ck.checked);closeModal();save('delete',{ID:v,resync:rs},th?'ลบประวัติแล้ว':'Deleted');return}
   if(a==='quickStatus'){const d={"S/N Analyzer":m.sn,"Status":v};if(v==='Stock'){d["Client name"]='';d["Location"]=''}
     save('edit_machine',d,v==='Broken'?(th?'เปลี่ยนสถานะเป็น "ส่งซ่อม" แล้ว':'Marked as in repair'):(th?'กลับเข้าคลังแล้ว':'Back in stock'));return}
   if(a==='saveStart'){const client=val('ff-client');if(!client){toast(th?'กรอกชื่อลูกค้าก่อน':'Client required');return}
@@ -290,11 +335,13 @@ function act(a,v){
   if(a==='saveHist'){const client=val('ff-client');if(!client){toast(th?'กรอกชื่อลูกค้าก่อน':'Client required');return}
     const d={sn:m.sn,client,loc:val('ff-loc'),mode:val('ff-mode'),start:val('ff-start'),end:val('ff-end'),status:val('ff-status'),result:val('ff-result'),remark:val('ff-rm')};
     if(d.end&&d.start&&d.end<d.start){toast(th?'วันสิ้นสุดต้องไม่ก่อนวันเริ่ม':'End date is before start');return}
-    if(UI.form.id) save('edit',histPayload({...d,id:UI.form.id}),th?'แก้ไขประวัติแล้ว':'Saved');
-    else { const p=histPayload(d); delete p.ID; p.autoCloseOldTrials=d.status==='In Progress'&&!!openTrial(m.sn); save('add',p,th?'เพิ่มประวัติแล้ว':'Added'); }
+    const ck=$('#ff-sync'),syncOn=!!(ck&&ck.checked&&!ck.disabled);
+    if(UI.form.id) save('edit',{...histPayload({...d,id:UI.form.id}),syncMachineStatus:syncOn},th?'แก้ไขประวัติแล้ว':'Saved');
+    else { const p=histPayload(d); delete p.ID; p.autoCloseOldTrials=d.status==='In Progress'&&!!openTrial(m.sn); p.syncMachineStatus=syncOn; save('add',p,th?'เพิ่มประวัติแล้ว':'Added'); }
     return}
   if(a==='saveMachine'){save('edit_machine',{"S/N Analyzer":m.sn,"Client name":val('mf-client'),"Location":val('mf-loc'),"Status":val('mf-status'),"Model":val('mf-model'),"Mode":val('mf-mode'),"Type":val('mf-type'),"S/N Edge server":val('mf-edge'),"Delivery date":val('mf-deliv')},th?'แก้ไขข้อมูลเครื่องแล้ว':'Machine updated');return}
 }
+function updDelEffect(){const box=$('#del-eff');if(!box||!UI.del)return;const ck=$('#del-sync');box.innerHTML=effectHtml(M(UI.open),UI.del.sim,!!(ck&&ck.checked))}
 const histPayload=x=>({ID:x.id,"S/N Analyzer":x.sn,"Client Name":x.client,"Location":x.loc,"Start Date":x.start,"End Date":x.end||'',"Status":x.status,"Result":x.result,"Remark":x.remark||'',"Mode":x.mode,syncMachineStatus:true});
 
 /* ---------- เชื่อมต่อ Apps Script ---------- */

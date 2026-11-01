@@ -300,3 +300,20 @@ tbody tr:last-child td{border-bottom:0}
 #ldErr[hidden]{display:none}
 .demo{display:none}
 .note[hidden]{display:none}
+/* ---------- กล่องทำนายผลกับข้อมูลเครื่อง ---------- */
+.synck{background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.synck.dis{opacity:.55}
+.eff{border-radius:10px;padding:10px 12px;font-size:13.5px;display:flex;flex-direction:column;gap:6px}
+.eff:not(:has(table)){flex-direction:row;gap:8px;align-items:flex-start}
+.eff.info{background:var(--tint);color:var(--brand-ink)}
+.eff.ok{background:var(--sold-bg);color:var(--sold)}
+.eff.mute{background:var(--surface2);color:var(--sub);border:1px dashed var(--line)}
+.eff.bad{background:var(--broken-bg);color:var(--broken);border:1px solid color-mix(in srgb,var(--broken) 35%,transparent)}
+.eff .eh{font-weight:700}
+.eff table{border-collapse:collapse;font-size:13px;width:100%}
+.eff th{text-align:left;font-weight:600;padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top;position:static;background:none;border:0;color:inherit;font-size:13px}
+.eff td{padding:3px 4px;border:0;vertical-align:top;color:var(--ink)}
+.eff tr.bad td,.eff tr.bad th{color:var(--broken)}
+.eff i{color:var(--mute)}
+.eff .ef{font-size:12.5px}
+.mbox .synck{margin-top:2px}
