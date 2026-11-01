@@ -35,7 +35,7 @@ const normStatus=v=>{const x=String(v||'').toLowerCase();return x.includes('comp
 const normResult=v=>{const x=String(v||'').trim();return x==='Bought'||x==='Not Bought'||x==='Swapped'?x:'Pending'};
 function ingest(data){
   const ms=(Array.isArray(data)?data:(data.machines||[])).filter(r=>String(r["Type"]||'').toLowerCase()!=='sorter'&&String(r["S/N Analyzer"]||'').trim());
-  S.machines=ms.map(r=>({sn:String(r["S/N Analyzer"]).trim(),edge:r["S/N Edge server"]||'',model:r["Model"]||'',mode:r["Mode"]||'',type:r["Type"]||'',
+  S.machines=ms.map(r=>({sn:String(r["S/N Analyzer"]).trim(),edge:r["S/N Edge server"]||'',gw:r["S/N Gateway"]||'',model:r["Model"]||'',mode:r["Mode"]||'',type:r["Type"]||'',
     status:normStatus(r["Status"]),raw:String(r["Status"]||'').trim(),client:r["Client name"]||'',loc:r["Location"]||'',deliv:ymd(r["Delivery date"]),period:parseInt(r["Period"],10),pmDone:!!(r["PM1_Status"]||r["PM2_Status"]||r["PM3_Status"]),pm1:ymd(r["PM1_Date"])}));
   S.hist=(Array.isArray(data)?[]:(data.histories||[])).filter(h=>String(h["S/N Analyzer"]||'').trim()).map(h=>({id:String(h["ID"]),sn:String(h["S/N Analyzer"]).trim(),client:h["Client Name"]||'',loc:h["Location"]||'',
     start:ymd(h["Start Date"]),end:ymd(h["End Date"]),status:String(h["Status"]||'').trim()==='Completed'?'Completed':'In Progress',result:normResult(h["Result"]),remark:h["Remark"]||'',mode:h["Mode"]||'',swapRef:String(h["Swap_Ref"]||'').trim()}));
@@ -45,7 +45,11 @@ let UI={pw:'',busy:false,syncing:false,err:null,view:'dash',stF:'all',typeF:'all
 const isBought=h=>h.result==='Bought'||h.result==='Swapped';
 const isReceiver=h=>!!h.swapRef&&h.result!=='Swapped'&&S.hist.some(x=>x.id===h.swapRef&&x.result==='Swapped'); // รายการรับเครื่องใหม่ ไม่นับเป็นการทดลอง
 const trialsOnly=()=>S.hist.filter(h=>!isReceiver(h));
-const M=sn=>S.machines.find(m=>m.sn===sn)||(S.hist.some(h=>h.sn===sn)?{sn,edge:'',model:'',mode:'',type:'',status:'Stock',client:'',loc:'',deliv:'',missing:true}:null);
+const M=sn=>S.machines.find(m=>m.sn===sn)||(S.hist.some(h=>h.sn===sn)?{sn,edge:'',gw:'',model:'',mode:'',type:'',status:'Stock',client:'',loc:'',deliv:'',missing:true}:null);
+// Edge server / Gateway: Lab มี Edge server ในตัว (ไม่มี Gateway) · Real-time มีทั้ง Edge server และ Gateway (คอลัมน์ S/N Gateway)
+const edgeTxt=m=>m.edge?esc(m.edge):(m.type==='Lab'?'<span class="muted">Built-in</span>':'—');
+const gwTxt=m=>m.gw?esc(m.gw):(m.type==='Lab'?'<span class="muted">'+(L===T.th?'ไม่มี (Lab)':'None (Lab)')+'</span>':'—');
+const devSub=m=>{const p=[];if(m.edge)p.push('Edge '+esc(m.edge));if(m.gw)p.push('GW '+esc(m.gw));return p.length?`<span class="subt">${p.join(' · ')}</span>`:'';};
 const openTrial=sn=>S.hist.find(h=>h.sn===sn&&h.status==='In Progress');
 const noClient=m=>{const th=L===T.th;return m.status==='Broken'?(th?'อยู่ระหว่างซ่อม':'in repair'):m.status==='Stock'?(th?'อยู่ในคลัง':'in stock'):(th?'ยังไม่ระบุลูกค้า':'no client')};
 const useDays=m=>Number.isFinite(m.period)&&m.period>0?m.period:(m.deliv?days(m.deliv):0);
@@ -72,7 +76,7 @@ function vMachines(){
     </div><div class="frow"><div class="chips">${['all','Stock','Test','Complete','Broken'].map(k=>`<button class="chip ${UI.stF===k?'on':''}" data-st="${k}" style="--c:var(${k==='all'?'--brand':ST_C[k][0]})">${k==='all'?'':'<i></i>'}${L.st[k]} <b class="num">${k==='all'?ms.length:st(k).length}</b></button>`).join('')}</div>
       ${(UI.q||UI.stF!=='all'||UI.typeF!=='all'||UI.modeF!=='all'||UI.clientF!=='all')?`<button class="link" data-act="clearF">${L.clear}</button>`:''}</div></div>`;
   const q=UI.q.toLowerCase();
-  let list=ms.filter(m=>(UI.stF==='all'||m.status===UI.stF)&&(UI.typeF==='all'||m.type===UI.typeF)&&(UI.modeF==='all'||m.mode===UI.modeF)&&(UI.clientF==='all'||m.client===UI.clientF)&&(!q||[m.sn,m.edge,m.client,m.loc,m.model,m.mode].join(' ').toLowerCase().includes(q)));
+  let list=ms.filter(m=>(UI.stF==='all'||m.status===UI.stF)&&(UI.typeF==='all'||m.type===UI.typeF)&&(UI.modeF==='all'||m.mode===UI.modeF)&&(UI.clientF==='all'||m.client===UI.clientF)&&(!q||[m.sn,m.edge,m.gw,m.client,m.loc,m.model,m.mode].join(' ').toLowerCase().includes(q)));
   const [sk,sd]=UI.sort, key={sn:m=>m.sn,model:m=>m.model,client:m=>m.client||'~',status:m=>m.status,deliv:m=>m.deliv||'0',use:m=>useDays(m)}[sk];
   list.sort((a,b)=>{const A=key(a),B=key(b);return (A>B?1:A<B?-1:0)*sd});
   h+=`<p class="count">${L===T.th?'แสดง':'Showing'} <b class="num">${list.length}</b> ${L.units} · ${L===T.th?'แตะที่เครื่องเพื่อดูรายละเอียดและประวัติ':'Tap a machine for details & history'}</p></div><div class="scroll" id="sc">`;
@@ -81,7 +85,7 @@ function vMachines(){
   const C=L.cols;
   h+=`<div class="tw"><table><thead><tr><th data-sort="sn">${C[0]}${ar('sn')}</th><th data-sort="model">${C[1]}${ar('model')}</th><th data-sort="client">${C[2]}${ar('client')}</th><th>${C[3]}</th><th>${C[4]}</th><th data-sort="status">${C[5]}${ar('status')}</th><th data-sort="deliv">${C[6]}${ar('deliv')}</th><th data-sort="use" class="r">${C[7]}${ar('use')}</th></tr></thead><tbody>
     ${list.map(m=>{const ot=openTrial(m.sn), u=useDays(m);
-      return `<tr data-open="${m.sn}"><td><span class="sn">${esc(m.sn)}</span><span class="subt">Edge ${esc(m.edge)}</span></td><td>${esc(m.model)}</td>
+      return `<tr data-open="${m.sn}"><td><span class="sn">${esc(m.sn)}</span>${devSub(m)}</td><td>${esc(m.model)}</td>
       <td>${m.client?`${esc(m.client)}<span class="subt">${esc(m.loc)}</span>`:'<span class="subt">— '+noClient(m)+'</span>'}</td>
       <td><span class="tag">${esc(m.mode)}</span></td><td>${esc(m.type)}</td>
       <td>${stPill(m.status)}${ot?`<span class="subt">${L===T.th?'ทดลองมา':'for'} ${days(ot.start)} ${L.days}</span>`:''}</td>
@@ -173,7 +177,7 @@ function drawer(){
   body+=`<div class="card"><h3>${th?'ข้อมูลเครื่อง':'Machine info'}</h3><dl class="kv">
     <div><dt>${th?'ลูกค้าปัจจุบัน':'Current client'}</dt><dd>${esc(m.client)||'–'}</dd></div><div><dt>${th?'สถานที่':'Location'}</dt><dd>${esc(m.loc)||'–'}</dd></div>
     <div><dt>Model</dt><dd>${esc(m.model)}</dd></div><div><dt>Mode</dt><dd>${esc(m.mode)}</dd></div>
-    <div><dt>${th?'ประเภท':'Type'}</dt><dd>${esc(m.type)}</dd></div><div><dt>S/N Edge server</dt><dd>${esc(m.edge)}</dd></div>
+    <div><dt>${th?'ประเภท':'Type'}</dt><dd>${esc(m.type)}</dd></div><div><dt>S/N Edge server</dt><dd>${edgeTxt(m)}</dd></div><div><dt>S/N Gateway</dt><dd>${gwTxt(m)}</dd></div>
     <div><dt>${th?'วันส่งมอบ':'Delivered'}</dt><dd>${fmtD(m.deliv)}</dd></div><div><dt>${th?'ใช้งานมา':'In use'}</dt><dd>${m.deliv?useDays(m)+' '+L.days:'–'}</dd></div></dl></div>`;
   body+=`<div class="card"><h3>${th?'ประวัติการทดลอง':'Trial history'}<small>${hs.length} ${th?'ครั้ง':'records'}</small></h3>${hs.length?`<ul class="tl">${hs.map(x=>{const open=x.status==='In Progress', c=open?'--test':RS_C[x.result][0];
     return `<li style="--c:var(${c})"><div class="tc"><div class="th"><b>${esc(x.client)}</b>${open?pill(L.st.Test,ST_C.Test):rsPill(x.result)}${UI.admin?`<span class="acts"><button class="btn sm ghost" data-act="editHist" data-v="${esc(x.id)}" aria-label="แก้ไข">${th?'แก้ไข':'Edit'}</button><button class="btn sm ghost" style="color:var(--broken)" data-act="delHist" data-v="${esc(x.id)}" aria-label="ลบ">${th?'ลบ':'Delete'}</button></span>`:''}</div>
@@ -291,7 +295,7 @@ function formHtml(m,hs,ot){
     <div class="f"><label>Model</label><select id="mf-model">${optsKeep(['Gen 1','Gen 2'],m.model)}</select></div>
     <div class="f"><label>Mode</label><select id="mf-mode">${optsKeep(['Milled rice','Paddy'],m.mode)}</select></div>
     <div class="f"><label>${th?'ประเภท':'Type'}</label><select id="mf-type">${optsKeep(['Lab','Real-time'],m.type)}</select></div>
-    <div class="f"><label>S/N Edge server</label><input id="mf-edge" value="${esc(m.edge)}"></div><div class="f"><label>${th?'วันส่งมอบ':'Delivered'}</label><input type="date" id="mf-deliv" value="${m.deliv}"><span class="hint">${th?'ใส่วันส่งมอบครั้งแรก ระบบคำนวณนัด PM 1–3 ให้':'PM 1–3 dates are scheduled from this'}</span></div></div>
+    <div class="f"><label>S/N Edge server</label><input id="mf-edge" value="${esc(m.edge)}" placeholder="${th?'Lab = Built-in (เว้นว่างได้)':'Lab = built-in (optional)'}"></div><div class="f"><label>S/N Gateway</label><input id="mf-gw" value="${esc(m.gw)}" placeholder="${th?'เฉพาะ Real-time':'Real-time only'}"></div><div class="f"><label>${th?'วันส่งมอบ':'Delivered'}</label><input type="date" id="mf-deliv" value="${m.deliv}"><span class="hint">${th?'ใส่วันส่งมอบครั้งแรก ระบบคำนวณนัด PM 1–3 ให้':'PM 1–3 dates are scheduled from this'}</span></div></div>
     <div class="hint">S/N Analyzer ${th?'แก้ไม่ได้ (ใช้ระบุเครื่อง)':'cannot be changed'}</div>${acts('saveMachine')}</div>`;
   return '';
 }
@@ -390,7 +394,7 @@ function act(a,v,e){
   if(a==='saveSwap'){const P=swapPlan(m);if(!P.toSn){toast(th?'เลือกเครื่องใหม่ก่อน':'Choose the new unit');return}
     if(P.x.start&&P.date<P.x.start){toast(th?'วันส่งมอบต้องไม่ก่อนวันเริ่มทดลอง':'Date is before the trial start');return}
     save('swap',{fromId:P.x.id,fromSn:m.sn,toSn:P.toSn,date:P.date,location:val('sw-loc')||P.x.loc,remark:val('sw-rm'),linkId:P.useLink?P.link.id:''},th?`บันทึกแล้ว · ลูกค้ารับเครื่อง ${P.toSn}`:'Saved');return}
-  if(a==='saveMachine'){save('edit_machine',{"S/N Analyzer":m.sn,"Client name":val('mf-client'),"Location":val('mf-loc'),"Status":val('mf-status'),"Model":val('mf-model'),"Mode":val('mf-mode'),"Type":val('mf-type'),"S/N Edge server":val('mf-edge'),"Delivery date":val('mf-deliv')},th?'แก้ไขข้อมูลเครื่องแล้ว':'Machine updated');return}
+  if(a==='saveMachine'){save('edit_machine',{"S/N Analyzer":m.sn,"Client name":val('mf-client'),"Location":val('mf-loc'),"Status":val('mf-status'),"Model":val('mf-model'),"Mode":val('mf-mode'),"Type":val('mf-type'),"S/N Edge server":val('mf-edge'),"S/N Gateway":val('mf-gw'),"Delivery date":val('mf-deliv')},th?'แก้ไขข้อมูลเครื่องแล้ว':'Machine updated');return}
 }
 function updDelEffect(){const box=$('#del-eff');if(!box||!UI.del)return;const ck=$('#del-sync');box.innerHTML=effectHtml(M(UI.open),UI.del.sim,!!(ck&&ck.checked))}
 const histPayload=x=>({ID:x.id,"S/N Analyzer":x.sn,"Client Name":x.client,"Location":x.loc,"Start Date":x.start,"End Date":x.end||'',"Status":x.status,"Result":x.result,"Remark":x.remark||'',"Mode":x.mode,syncMachineStatus:true});
