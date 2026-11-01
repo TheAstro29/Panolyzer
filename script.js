@@ -1,1252 +1,343 @@
+
+(function(){
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const scriptURL = "https://script.google.com/macros/s/AKfycbzVzNPx9iTSbJwdaYH3YSNRuyaMgXel40oWfDlzY8KlMLXG2X5-1X63A9QBgF8JDD-z/exec";
-const CACHE_KEY = "c2tech_machines_data_v3"; // เปลี่ยน Key Cache เพื่อรีเซ็ตของเก่า
-let machines = [];
-let rejectedMachines = [];
-let histories = []; // เพิ่มตัวแปรเก็บประวัติ
-let currentView = 'all';
-let trialStatusQuickFilter = 'all'; // 'all' | 'In Progress' -- ใช้ตอนคลิกจากการ์ด TEST เพื่อกรองเฉพาะเครื่องที่กำลังทดลองอยู่
-let currentLang = localStorage.getItem('c2_lang') || 'th';
-let searchTimeout;
+const CACHE_KEY = "c2tech_machines_data_v3", SYNC_KEY = "last_sync_time", LANG_KEY = "c2_lang", THEME_KEY = "c2_theme";
+const pad=n=>String(n).padStart(2,'0');
+const ymdOf=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+// วันที่จากชีต: Apps Script ส่งเป็นเวลาสากล (เช่น 2026-09-30T17:00:00Z = 1 ต.ค. เวลาไทย) → ใช้วันที่ตามเวลาเครื่อง
+// (แก้บั๊กเดิมที่ใช้ toISOString แล้ววันที่ถอยหลัง 1 วันทุกครั้งที่กดแก้ไข)
+const ymd=v=>{if(!v)return '';const t=String(v).trim();if(/^\d{4}-\d{2}-\d{2}$/.test(t))return t;const d=new Date(t);return isNaN(d)?'':ymdOf(d)};
+let TODAY=ymdOf(new Date());
+const D=s=>new Date(s+'T00:00:00');
+const days=(a,b)=>a?Math.max(0,Math.round((D(b||TODAY)-D(a))/864e5)):0;
+const addD=(s,n)=>{const d=D(s);d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)};
 
-// --- ระบบ Admin Login สำหรับปลดล็อกการเพิ่มข้อมูล ---
-let isAdmin = false;
-let adminPasswordCache = ''; // เก็บรหัสไว้ใน memory เท่านั้น (ไม่ persist) เพื่อส่งให้ backend เช็คซ้ำทุกครั้งที่แก้ไขข้อมูล
-// หมายเหตุ: เดิมเก็บรหัสผ่าน Admin ไว้ในไฟล์นี้แบบ base64 (ตัวแปรชื่อ _0x1a2b) เพื่อเทียบกันเองฝั่ง client
-// ก่อนส่งไปเซิร์ฟเวอร์อีกที — ปัญหาคือ base64 ไม่ใช่การเข้ารหัส ใครก็ตามที่เปิด DevTools ดู source ของหน้าเว็บ
-// สามารถ atob() ถอดรหัสผ่านจริงออกมาได้ทันที ตอนนี้ตัดออกทั้งหมดแล้ว ให้ backend (Code.gs) เป็นคนตรวจสอบรหัสผ่าน
-// เพียงผู้เดียว ฝั่งนี้แค่ส่งรหัสที่ผู้ใช้กรอกไปให้เช็ค แล้วรับรู้แค่ผล success/error กลับมาเท่านั้น
+/* ---------- i18n (UI) ---------- */
+const T={th:{'nav.machines':'เครื่องทั้งหมด','nav.trials':'การทดลอง',refresh:'รีเฟรชข้อมูล',admin:'เข้าสู่ระบบ Admin',adminOut:'ออกจาก Admin',search:'ค้นหา S/N, ลูกค้า, สถานที่…',allClients:'ลูกค้าทั้งหมด',allModes:'ทุกโหมด',allTypes:'ทุกประเภท',clear:'ล้างตัวกรอง',units:'เครื่อง',days:'วัน',updated:'อัปเดต',
+ st:{all:'ทั้งหมด',Stock:'ในคลัง',Test:'กำลังทดลอง',Complete:'ขายแล้ว',Broken:'ส่งซ่อม'},res:{Bought:'ซื้อ',"Not Bought":'ไม่ซื้อ',Pending:'รอพิจารณา'},
+ cols:['S/N Analyzer','Model','ลูกค้า / สถานที่','Mode','ประเภท','สถานะ','ส่งมอบ','ใช้งานมา']},
+en:{'nav.machines':'All Machines','nav.trials':'Trials',refresh:'Refresh data',admin:'Admin login',adminOut:'Leave Admin',search:'Search S/N, client, location…',allClients:'All clients',allModes:'All modes',allTypes:'All types',clear:'Clear filters',units:'units',days:'days',updated:'Updated',
+ st:{all:'All',Stock:'In stock',Test:'On trial',Complete:'Sold',Broken:'In repair'},res:{Bought:'Bought',"Not Bought":'Not bought',Pending:'Pending'},
+ cols:['S/N Analyzer','Model','Client / Location','Mode','Type','Status','Delivered','In use']}};
+let L=T.th;
+const ST_C={Stock:['--stock','--stock-bg'],Test:['--test','--test-bg'],Complete:['--sold','--sold-bg'],Broken:['--broken','--broken-bg']};
+const RS_C={Bought:['--sold','--sold-bg'],"Not Bought":['--broken','--broken-bg'],Pending:['--pend','--pend-bg']};
+const pill=(txt,c)=>`<span class="pill" style="--c:var(${c[0]});--b:var(${c[1]})">${esc(txt)}</span>`;
+const stPill=s=>pill(L.st[s]||s,ST_C[s]||ST_C.Stock);
+const rsPill=r=>pill(L.res[r]||r,RS_C[r]||RS_C.Pending);
+const fmtD=s=>{if(!s)return '–';const d=D(s);return d.toLocaleDateString(L===T.th?'th-TH':'en-GB',{day:'numeric',month:'short',year:'2-digit'})};
 
-async function adminAuth() {
-    if (isAdmin) {
-        isAdmin = false;
-        adminPasswordCache = '';
-        updateLockIcons();
-        Toast.fire({ icon: 'info', title: 'ออกจากระบบ Admin แล้ว' });
-        return;
-    }
+/* ---------- ข้อมูลสมมติ ---------- */
+let S={machines:[],hist:[]};
+const normStatus=v=>{const x=String(v||'').toLowerCase();return x.includes('complete')?'Complete':x.includes('broken')?'Broken':(x.includes('test')||x.includes('progress'))?'Test':'Stock'};
+const normResult=v=>{const x=String(v||'').trim();return x==='Bought'||x==='Not Bought'?x:'Pending'};
+function ingest(data){
+  const ms=(Array.isArray(data)?data:(data.machines||[])).filter(r=>String(r["Type"]||'').toLowerCase()!=='sorter'&&String(r["S/N Analyzer"]||'').trim());
+  S.machines=ms.map(r=>({sn:String(r["S/N Analyzer"]).trim(),edge:r["S/N Edge server"]||'',model:r["Model"]||'',mode:r["Mode"]||'',type:r["Type"]||'',
+    status:normStatus(r["Status"]),raw:String(r["Status"]||'').trim(),client:r["Client name"]||'',loc:r["Location"]||'',deliv:ymd(r["Delivery date"]),period:parseInt(r["Period"],10)}));
+  S.hist=(Array.isArray(data)?[]:(data.histories||[])).filter(h=>String(h["S/N Analyzer"]||'').trim()).map(h=>({id:String(h["ID"]),sn:String(h["S/N Analyzer"]).trim(),client:h["Client Name"]||'',loc:h["Location"]||'',
+    start:ymd(h["Start Date"]),end:ymd(h["End Date"]),status:String(h["Status"]||'').trim()==='Completed'?'Completed':'In Progress',result:normResult(h["Result"]),remark:h["Remark"]||'',mode:h["Mode"]||''}));
+}
+let UI={pw:'',busy:false,syncing:false,err:null,view:'dash',stF:'all',typeF:'all',modeF:'all',clientF:'all',q:'',sort:['use',-1],trTab:'open',resF:'all',open:null,form:null,admin:false,lang:'th',synced:''};
+const M=sn=>S.machines.find(m=>m.sn===sn)||(S.hist.some(h=>h.sn===sn)?{sn,edge:'',model:'',mode:'',type:'',status:'Stock',client:'',loc:'',deliv:'',missing:true}:null);
+const openTrial=sn=>S.hist.find(h=>h.sn===sn&&h.status==='In Progress');
+const noClient=m=>{const th=L===T.th;return m.status==='Broken'?(th?'อยู่ระหว่างซ่อม':'in repair'):m.status==='Stock'?(th?'อยู่ในคลัง':'in stock'):(th?'ยังไม่ระบุลูกค้า':'no client')};
+const useDays=m=>Number.isFinite(m.period)&&m.period>0?m.period:(m.deliv?days(m.deliv):0);
 
-    const { value: password } = await Swal.fire({
-        title: 'Admin Access',
-        input: 'password',
-        inputLabel: 'กรุณาใส่รหัสผ่านเพื่อเพิ่มข้อมูล',
-        inputPlaceholder: 'Password',
-        confirmButtonColor: '#2C4C3A',
-        showCancelButton: true,
-        cancelButtonText: 'ยกเลิก',
-        showLoaderOnConfirm: true,
-        allowOutsideClick: () => !Swal.isLoading(),
-        preConfirm: async (value) => {
-            if (!value) {
-                Swal.showValidationMessage('กรุณากรอกรหัสผ่าน');
-                return false;
-            }
-            try {
-                const response = await fetch(scriptURL, {
-                    method: 'POST',
-                    body: JSON.stringify({ action: 'verify_admin', adminPassword: value }),
-                    headers: { "Content-Type": "text/plain;charset=utf-8" } // ใช้ text/plain เลี่ยงปัญหา CORS Preflight
-                });
-                const result = await response.json();
-                if (result.status !== 'success') {
-                    Swal.showValidationMessage(result.message || 'รหัสผ่านไม่ถูกต้อง');
-                    return false;
-                }
-                return value;
-            } catch (e) {
-                console.error("Error verifying admin password:", e);
-                Swal.showValidationMessage('ไม่สามารถเชื่อมต่อเพื่อตรวจสอบรหัสผ่านได้ กรุณาลองใหม่อีกครั้ง');
-                return false;
-            }
-        }
-    });
-
-    if (password === undefined) return; // กดยกเลิก หรือรหัสผ่านไม่ถูกต้อง (preConfirm คืนค่า false)
-
-    isAdmin = true;
-    adminPasswordCache = password;
-    updateLockIcons();
-    Toast.fire({ icon: 'success', title: 'ยินดีต้อนรับ Admin' });
+/* ---------- views ---------- */
+function vMachines(){
+  const ms=S.machines, by=(f)=>ms.filter(f).length;
+  const lab=m=>m.type==='Lab', rt=m=>m.type==='Real-time';
+  const st=(k)=>ms.filter(m=>m.status===k);
+  const lr=a=>`Lab ${a.filter(lab).length} · RT ${a.filter(rt).length}`;
+  const stat=(key,label,val,sub,c)=>`<button class="stat ${UI.statKey===key?'on':''}" style="--c:var(${c})" data-stat="${key}"><small>${label}</small><b class="num">${val}</b><em>${sub}</em></button>`;
+  let h=`<div class="fixed"><div class="stats">
+    ${stat('all',L===T.th?'เครื่องทั้งหมด':'All machines',ms.length,`Lab ${by(lab)} · Real-time ${by(rt)}`,'--brand')}
+    ${stat('Stock',L.st.Stock,st('Stock').length,lr(st('Stock')),'--stock')}
+    ${stat('Test',L.st.Test,st('Test').length,lr(st('Test')),'--test')}
+    ${stat('Complete',L.st.Complete,st('Complete').length,lr(st('Complete')),'--sold')}
+    ${stat('Broken',L.st.Broken,st('Broken').length,lr(st('Broken')),'--broken')}</div>`;
+  const clients=[...new Set(ms.map(m=>m.client).filter(Boolean))].sort();
+  h+=`<div class="filters"><div class="frow">
+      <label class="search"><svg class="ms" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--mute)"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" placeholder="${L.search}" value="${esc(UI.q)}" aria-label="ค้นหา"></label>
+      <select class="sel" id="fClient" aria-label="ลูกค้า"><option value="all">${L.allClients}</option>${clients.map(c=>`<option ${UI.clientF===c?'selected':''}>${esc(c)}</option>`).join('')}</select>
+      <select class="sel" id="fMode" aria-label="โหมด"><option value="all">${L.allModes}</option>${['Milled rice','Paddy'].map(x=>`<option ${UI.modeF===x?'selected':''}>${x}</option>`).join('')}</select>
+      <div class="seg" role="group">${[['all',L.allTypes],['Lab','Lab'],['Real-time','Real-time']].map(([k,t])=>`<button class="${UI.typeF===k?'on':''}" data-type="${k}">${t}</button>`).join('')}</div>
+    </div><div class="frow"><div class="chips">${['all','Stock','Test','Complete','Broken'].map(k=>`<button class="chip ${UI.stF===k?'on':''}" data-st="${k}" style="--c:var(${k==='all'?'--brand':ST_C[k][0]})">${k==='all'?'':'<i></i>'}${L.st[k]} <b class="num">${k==='all'?ms.length:st(k).length}</b></button>`).join('')}</div>
+      ${(UI.q||UI.stF!=='all'||UI.typeF!=='all'||UI.modeF!=='all'||UI.clientF!=='all')?`<button class="link" data-act="clearF">${L.clear}</button>`:''}</div></div>`;
+  const q=UI.q.toLowerCase();
+  let list=ms.filter(m=>(UI.stF==='all'||m.status===UI.stF)&&(UI.typeF==='all'||m.type===UI.typeF)&&(UI.modeF==='all'||m.mode===UI.modeF)&&(UI.clientF==='all'||m.client===UI.clientF)&&(!q||[m.sn,m.edge,m.client,m.loc,m.model,m.mode].join(' ').toLowerCase().includes(q)));
+  const [sk,sd]=UI.sort, key={sn:m=>m.sn,model:m=>m.model,client:m=>m.client||'~',status:m=>m.status,deliv:m=>m.deliv||'0',use:m=>useDays(m)}[sk];
+  list.sort((a,b)=>{const A=key(a),B=key(b);return (A>B?1:A<B?-1:0)*sd});
+  h+=`<p class="count">${L===T.th?'แสดง':'Showing'} <b class="num">${list.length}</b> ${L.units} · ${L===T.th?'แตะที่เครื่องเพื่อดูรายละเอียดและประวัติ':'Tap a machine for details & history'}</p></div><div class="scroll" id="sc">`;
+  if(!list.length) return h+`<div class="tw" style="display:block"><div class="empty">${L===T.th?'ไม่พบเครื่องที่ตรงกับตัวกรอง':'No machines match'}</div></div></div>`;
+  const ar=k=>UI.sort[0]===k?`<span class="ar">${UI.sort[1]>0?'▲':'▼'}</span>`:'';
+  const C=L.cols;
+  h+=`<div class="tw"><table><thead><tr><th data-sort="sn">${C[0]}${ar('sn')}</th><th data-sort="model">${C[1]}${ar('model')}</th><th data-sort="client">${C[2]}${ar('client')}</th><th>${C[3]}</th><th>${C[4]}</th><th data-sort="status">${C[5]}${ar('status')}</th><th data-sort="deliv">${C[6]}${ar('deliv')}</th><th data-sort="use" class="r">${C[7]}${ar('use')}</th></tr></thead><tbody>
+    ${list.map(m=>{const ot=openTrial(m.sn), u=useDays(m);
+      return `<tr data-open="${m.sn}"><td><span class="sn">${esc(m.sn)}</span><span class="subt">Edge ${esc(m.edge)}</span></td><td>${esc(m.model)}</td>
+      <td>${m.client?`${esc(m.client)}<span class="subt">${esc(m.loc)}</span>`:'<span class="subt">— '+noClient(m)+'</span>'}</td>
+      <td><span class="tag">${esc(m.mode)}</span></td><td>${esc(m.type)}</td>
+      <td>${stPill(m.status)}${ot?`<span class="subt">${L===T.th?'ทดลองมา':'for'} ${days(ot.start)} ${L.days}</span>`:''}</td>
+      <td class="num">${fmtD(m.deliv)}</td><td class="r num ${u>365?'long':''}">${u?u+' '+L.days:'–'}</td></tr>`}).join('')}</tbody></table></div>
+    <div class="cards">${list.map(m=>{const ot=openTrial(m.sn);return `<button class="mc" data-open="${m.sn}"><div class="h"><span class="sn">${esc(m.sn)}</span>${stPill(m.status)}</div>
+      <div class="who">${m.client?esc(m.client)+' · <span style="color:var(--sub)">'+esc(m.loc)+'</span>':'<span style="color:var(--mute)">'+noClient(m)+'</span>'}</div>
+      <div class="meta"><span class="tag">${esc(m.type)}</span><span class="tag">${esc(m.mode)}</span><span>${esc(m.model)}</span>${ot?`<span style="color:var(--test);font-weight:600">· ${L===T.th?'ทดลองมา':'trial'} ${days(ot.start)} ${L.days}</span>`:m.deliv?`<span>· ${L===T.th?'ส่งมอบ':'delivered'} ${fmtD(m.deliv)}</span>`:''}</div></button>`}).join('')}</div></div>`;
+  return h;
 }
 
-function updateLockIcons() {
-    document.querySelectorAll('.admin-login-btn').forEach(icon => {
-        icon.className = isAdmin ? 'fas fa-lock-open admin-login-btn active' : 'fas fa-lock admin-login-btn';
-    });
-    const adminBtnText = document.getElementById('adminBtnText');
-    if (adminBtnText) adminBtnText.innerText = isAdmin ? 'ออกจากระบบ Admin' : 'Admin Login';
+function vTrials(){
+  const open=S.hist.filter(h=>h.status==='In Progress').sort((a,b)=>a.start.localeCompare(b.start));
+  const done=S.hist.filter(h=>h.status==='Completed');
+  let h=`<div class="fixed"><div class="tabs" role="tablist"><button class="${UI.trTab==='open'?'on':''}" data-tr="open">${L===T.th?'กำลังทดลอง':'On trial'}<span class="ct num">${open.length}</span></button><button class="${UI.trTab==='done'?'on':''}" data-tr="done">${L===T.th?'จบแล้ว':'Finished'}<span class="ct num">${done.length}</span></button></div>`;
+  const endFixed='</div><div class="scroll" id="sc">';
+  if(UI.trTab==='open'){
+    if(!open.length) return h+endFixed+`<div class="card empty">${L===T.th?'ไม่มีเครื่องที่กำลังทดลอง':'No machines on trial'}</div></div>`;
+    h+=`<p class="count">${L===T.th?'เรียงจากทดลองนานสุด · เกิน 45 วันขึ้นสีส้ม เกิน 90 วันขึ้นสีแดง':'Longest first · amber after 45 days, red after 90'}</p>`+endFixed+`<div class="tgrid">`+open.map(t=>{const m=M(t.sn)||{}, d=days(t.start), c=d>90?'--broken':d>45?'--test':'--brand';
+      return `<div class="tcard" data-open="${t.sn}" role="button" tabindex="0"><div class="h"><div><b>${esc(t.client)}</b><div class="meta">${esc(t.loc)}</div></div>${pill(L.st.Test,ST_C.Test)}</div>
+        <div class="meta"><span class="sn" style="color:var(--ink)">${esc(t.sn)}</span><span class="tag">${esc(m.type||'')}</span><span class="tag">${esc(t.mode)}</span><span>${esc(m.model||'')}</span></div>
+        <div class="dur"><div><small>${L===T.th?'เริ่ม':'Started'} ${fmtD(t.start)}</small></div><div class="bar" style="--c:var(${c})"><i style="width:${Math.min(100,d/120*100)}%"></i></div><b class="num" style="color:var(${c})">${d}<small> ${L.days}</small></b></div>
+        ${d>90?`<div class="warn hot">● ${L===T.th?'ทดลองนานมาก ควรสรุปผลกับลูกค้า':'Very long trial — follow up for a decision'}</div>`:d>45?`<div class="warn">● ${L===T.th?'เกิน 45 วัน ควรติดตามผล':'Over 45 days — follow up'}</div>`:''}
+        ${t.remark?`<div class="meta">“${esc(t.remark)}”</div>`:''}
+        ${UI.admin?`<div class="acts"><button class="btn sm pri" data-act="closeTrial" data-v="${t.sn}">${L===T.th?'ปิดการทดลอง':'End trial'}</button></div>`:''}</div>`}).join('')+'</div></div>';
+    return h;
+  }
+  const cnt=k=>done.filter(x=>x.result===k).length;
+  h+=`<div class="filters"><div class="frow"><label class="search"><svg class="ms" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--mute)"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q2" placeholder="${L===T.th?'ค้นหาลูกค้า, S/N, จังหวัด…':'Search client, S/N, province…'}" value="${esc(UI.q2||'')}"></label></div>
+    <div class="chips">${['all','Not Bought','Pending','Bought'].map(k=>`<button class="chip ${UI.resF===k?'on':''}" data-res="${k}" style="--c:var(${k==='all'?'--brand':RS_C[k][0]})">${k==='all'?'':'<i></i>'}${k==='all'?L.st.all:L.res[k]} <b class="num">${k==='all'?done.length:cnt(k)}</b></button>`).join('')}</div></div>`+endFixed;
+  const q=(UI.q2||'').toLowerCase();
+  let list=done.filter(x=>(UI.resF==='all'||x.result===UI.resF)&&(!q||[x.client,x.sn,x.loc].join(' ').toLowerCase().includes(q)));
+  list.sort((a,b)=>((a.result==='Not Bought'?0:1)-(b.result==='Not Bought'?0:1))||(days(b.start,b.end)-days(a.start,a.end)));
+  if(!list.length) return h+`<div class="card empty">${L===T.th?'ไม่พบรายการ':'Nothing found'}</div></div>`;
+  const C=L===T.th?['ลูกค้า / จังหวัด','S/N Analyzer','Model','Mode','ช่วงทดลอง','รวม','ผล']:['Client / Province','S/N Analyzer','Model','Mode','Trial period','Total','Result'];
+  h+=`<div class="tw"><table><thead><tr>${C.map((c,i)=>`<th class="${i===5?'r':''}">${c}</th>`).join('')}</tr></thead><tbody>${list.map(x=>{const m=M(x.sn)||{};return `<tr data-open="${x.sn}"><td><b>${esc(x.client)}</b><span class="subt">${esc(x.loc)}</span></td><td class="sn">${esc(x.sn)}</td><td>${esc(m.model||'–')}</td><td><span class="tag">${esc(x.mode)}</span></td><td class="num">${fmtD(x.start)} – ${fmtD(x.end)}</td><td class="r num">${days(x.start,x.end)} ${L.days}</td><td>${rsPill(x.result)}${x.remark?`<span class="subt" style="max-width:220px;white-space:normal">${esc(x.remark)}</span>`:''}</td></tr>`}).join('')}</tbody></table></div>
+    <div class="cards">${list.map(x=>`<button class="mc" data-open="${x.sn}"><div class="h"><b>${esc(x.client)}</b>${rsPill(x.result)}</div><div class="meta"><span class="sn" style="color:var(--ink)">${esc(x.sn)}</span><span class="tag">${esc(x.mode)}</span><span>${esc(x.loc)}</span></div><div class="meta">${fmtD(x.start)} – ${fmtD(x.end)} · <b class="num" style="color:var(--ink)">${days(x.start,x.end)} ${L.days}</b></div>${x.remark?`<div class="meta">“${esc(x.remark)}”</div>`:''}</button>`).join('')}</div></div>`;
+  return h;
 }
 
-const Toast = Swal.mixin({
-    toast: true,
-    position: 'top-end',
-    showConfirmButton: false,
-    timer: 1500,
-    timerProgressBar: true,
-    didOpen: (toast) => {
-        toast.addEventListener('mouseenter', Swal.stopTimer)
-        toast.addEventListener('mouseleave', Swal.resumeTimer)
-    }
+function vDash(){
+  const ms=S.machines, sold=ms.filter(m=>m.status==='Complete').length;
+  const done=S.hist.filter(h=>h.status==='Completed'), open=S.hist.filter(h=>h.status==='In Progress');
+  const nb=done.filter(h=>h.result==='Not Bought'), pd=done.filter(h=>h.result==='Pending');
+  const total=sold+nb.length+pd.length, pct=n=>total?Math.round(n/total*100):0;
+  const kpi=(l,v,s,c)=>`<div class="kpi"><small><i style="--c:var(${c})"></i>${l}</small><b class="num">${v}</b><em>${s}</em></div>`;
+  let h=`<div class="scroll whole" id="sc"><div class="dgrid">${kpi(L.st.Complete,sold,`${pct(sold)}% ${L===T.th?'ของเครื่องที่ทดลองจบแล้ว':'of finished trials'}`,'--sold')}${kpi(L.res['Not Bought'],nb.length,`${pct(nb.length)}%`,'--broken')}${kpi(L.res.Pending,pd.length,`${pct(pd.length)}% · ${L===T.th?'ต้องติดตาม':'follow up'}`,'--pend')}${kpi(L.st.Test,open.length,L===T.th?'ยังไม่จบการทดลอง':'not finished yet','--test')}</div>`;
+  // donut
+  const segs=[[sold,'--sold',L.st.Complete],[nb.length,'--broken',L.res['Not Bought']],[pd.length,'--pend',L.res.Pending]];
+  const Cc=2*Math.PI*40; let acc=0;
+  const arcs=total?segs.map(([v,c])=>{if(!v)return '';const len=v/total*Cc, gap=Math.min(2,len*.2);const a=`<circle r="40" cx="50" cy="50" fill="none" stroke="var(${c})" stroke-width="16" stroke-dasharray="${(len-gap).toFixed(2)} ${(Cc-len+gap).toFixed(2)}" stroke-dashoffset="${(-acc).toFixed(2)}"/>`;acc+=len;return a}).join(''):'';
+  const conv=total?Math.round(sold/total*100):0;
+  h+=`<div class="d2"><div class="card"><h3>${L===T.th?'ผลการทดลองทั้งหมด':'Trial outcomes'}<small>${total} ${L.units} · ${L===T.th?'ขายแล้วนับจากสถานะเครื่องจริง':'sold = actual machine status'}</small></h3>
+    <div class="donutw"><svg viewBox="0 0 100 100" width="170" height="170" role="img" aria-label="สัดส่วนผลการทดลอง"><g transform="rotate(-90 50 50)"><circle r="40" cx="50" cy="50" fill="none" stroke="var(--line2)" stroke-width="16"/>${arcs}</g><text x="50" y="50" text-anchor="middle" style="font:700 17px 'Chakra Petch';fill:var(--ink)">${conv}%</text><text x="50" y="62" text-anchor="middle" style="font:500 7px 'Chakra Petch';fill:var(--sub)">${L===T.th?'ทดลองแล้วซื้อ':'converted'}</text></svg>
+    <div class="lg">${segs.map(([v,c,l])=>`<span><i style="--c:var(${c})"></i>${l}<b class="num">${v} (${pct(v)}%)</b></span>`).join('')}</div></div></div>`;
+  // fleet
+  const rows=[['Lab',m=>m.type==='Lab'],['Real-time',m=>m.type==='Real-time']];
+  h+=`<div class="card"><h3>${L===T.th?'สถานะเครื่องตามประเภท':'Fleet by type'}<small>${ms.length} ${L.units}</small></h3><div class="hbar">${rows.map(([n,f])=>{const a=ms.filter(f);return `<div class="row"><span>${n}</span><div class="track">${['Complete','Test','Stock','Broken'].map(k=>{const v=a.filter(m=>m.status===k).length;return v?`<i style="width:${v/a.length*100}%;background:var(${ST_C[k][0]})" title="${L.st[k]} ${v}"></i>`:''}).join('')}</div><b class="num r">${a.length}</b></div>`}).join('')}
+    <div class="lg" style="flex-direction:row;flex-wrap:wrap;gap:14px;font-size:13px">${['Complete','Test','Stock','Broken'].map(k=>`<span><i style="--c:var(${ST_C[k][0]})"></i>${L.st[k]} <b class="num" style="margin:0;padding:0">${ms.filter(m=>m.status===k).length}</b></span>`).join('')}</div></div></div></div>`;
+  // follow up
+  const it=(sn,t,s,r)=>`<div class="it" data-open="${sn}"><div class="bd"><b>${esc(t)}</b><small>${s}</small></div>${r}</div>`;
+  h+=`<div class="d2"><div class="card"><h3>${L===T.th?'รอพิจารณา — ต้องติดตาม':'Pending — follow up'}<small>${pd.length}</small></h3><div class="list">${pd.sort((a,b)=>a.end.localeCompare(b.end)).map(x=>it(x.sn,x.client,`${esc(x.sn)} · ${L===T.th?'จบทดลอง':'ended'} ${fmtD(x.end)}${x.remark?' · '+esc(x.remark):''}`,`<span class="big num" style="color:var(--pend)">${days(x.end)}<small style="font-size:12px;font-weight:400"> ${L.days}</small></span>`)).join('')||`<div class="empty">—</div>`}</div></div>
+    <div class="card"><h3>${L===T.th?'กำลังทดลองนานที่สุด':'Longest running trials'}<small>${open.length}</small></h3><div class="list">${open.sort((a,b)=>a.start.localeCompare(b.start)).slice(0,5).map(x=>{const d=days(x.start);return it(x.sn,x.client,`${esc(x.sn)} · ${esc(x.mode)} · ${L===T.th?'เริ่ม':'since'} ${fmtD(x.start)}`,`<span class="big num" style="color:var(${d>90?'--broken':d>45?'--test':'--brand'})">${d}<small style="font-size:12px;font-weight:400"> ${L.days}</small></span>`)}).join('')||`<div class="empty">—</div>`}</div></div></div></div>`;
+  return h;
+}
+
+/* ---------- drawer ---------- */
+function drawer(){
+  const m=M(UI.open); if(!m){closeDrawer();return}
+  const hs=S.hist.filter(h=>h.sn===m.sn).sort((a,b)=>b.start.localeCompare(a.start)), ot=openTrial(m.sn), th=L===T.th;
+  let body='';
+  if(m.missing) body+=`<div class="note warnb">⚠ ${th?'ไม่พบเครื่องนี้ในชีต Panolyzer Data (มีแค่ในประวัติ)':'Machine not found in Panolyzer Data'}</div>`;
+  if(UI.admin && !UI.form && !m.missing){
+    body+=`<div class="qa">${ot?`<button class="btn pri" data-act="closeTrial" data-v="${m.sn}">${th?'ปิดการทดลอง':'End trial'}</button>`:`<button class="btn pri" data-act="startTrial" data-v="${m.sn}">${th?'เริ่มทดลองกับลูกค้า':'Start a trial'}</button>`}
+      <button class="btn" data-act="editMachine">${th?'แก้ไขข้อมูลเครื่อง':'Edit machine'}</button>
+      ${m.status==='Broken'?`<button class="btn" data-act="quickStatus" data-v="Stock">${th?'ซ่อมเสร็จ · กลับเข้าคลัง':'Repaired · back to stock'}</button>`:m.status!=='Complete'?`<button class="btn danger" data-act="quickStatus" data-v="Broken">${th?'ส่งซ่อม':'Send to repair'}</button>`:''}
+      <button class="btn" data-act="addHist">${th?'เพิ่มประวัติเอง':'Add history'}</button></div>`;
+  }
+  if(UI.form) body+=formHtml(m,hs,ot);
+  if(!UI.admin) body+=`<div class="lock"><svg class="ms" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>${th?'ดูอย่างเดียว · แก้ไขได้เมื่อเข้าสู่ระบบ Admin':'View only · log in as Admin to edit'}<button class="btn sm" data-act="admin">${th?'เข้าสู่ระบบ':'Log in'}</button></div>`;
+  body+=`<div class="card"><h3>${th?'ข้อมูลเครื่อง':'Machine info'}</h3><dl class="kv">
+    <div><dt>${th?'ลูกค้าปัจจุบัน':'Current client'}</dt><dd>${esc(m.client)||'–'}</dd></div><div><dt>${th?'สถานที่':'Location'}</dt><dd>${esc(m.loc)||'–'}</dd></div>
+    <div><dt>Model</dt><dd>${esc(m.model)}</dd></div><div><dt>Mode</dt><dd>${esc(m.mode)}</dd></div>
+    <div><dt>${th?'ประเภท':'Type'}</dt><dd>${esc(m.type)}</dd></div><div><dt>S/N Edge server</dt><dd>${esc(m.edge)}</dd></div>
+    <div><dt>${th?'วันส่งมอบ':'Delivered'}</dt><dd>${fmtD(m.deliv)}</dd></div><div><dt>${th?'ใช้งานมา':'In use'}</dt><dd>${m.deliv?useDays(m)+' '+L.days:'–'}</dd></div></dl></div>`;
+  body+=`<div class="card"><h3>${th?'ประวัติการทดลอง':'Trial history'}<small>${hs.length} ${th?'ครั้ง':'records'}</small></h3>${hs.length?`<ul class="tl">${hs.map(x=>{const open=x.status==='In Progress', c=open?'--test':RS_C[x.result][0];
+    return `<li style="--c:var(${c})"><div class="tc"><div class="th"><b>${esc(x.client)}</b>${open?pill(L.st.Test,ST_C.Test):rsPill(x.result)}${UI.admin?`<span class="acts"><button class="btn sm ghost" data-act="editHist" data-v="${esc(x.id)}" aria-label="แก้ไข">${th?'แก้ไข':'Edit'}</button><button class="btn sm ghost" style="color:var(--broken)" data-act="delHist" data-v="${esc(x.id)}" aria-label="ลบ">${th?'ลบ':'Delete'}</button></span>`:''}</div>
+      <div class="per">${esc(x.loc)} · ${esc(x.mode)} · ${fmtD(x.start)} – ${open?(th?'ปัจจุบัน':'now'):fmtD(x.end)} · <b class="num">${days(x.start,open?'':x.end)} ${L.days}</b></div>${x.remark?`<div class="rm">${esc(x.remark)}</div>`:''}</div></li>`}).join('')}</ul>`:`<div class="empty" style="padding:16px">${th?'ยังไม่เคยทดลอง':'No trials yet'}</div>`}</div>`;
+  $('#drawer').innerHTML=`<div class="dh"><div class="t"><h2 class="num">${esc(m.sn)}</h2><div>${stPill(m.status)}<span class="tag">${esc(m.type)}</span><span class="tag">${esc(m.mode)}</span><span class="tag">${esc(m.model)}</span></div></div><button class="iconbtn" data-act="close" aria-label="ปิด">✕</button></div><div class="db">${body}</div>`;
+}
+const optsKeep=(list,cur)=>{const c=String(cur||'').trim();return (c&&!list.includes(c)?`<option value="${esc(c)}" selected>${esc(c)} (${L===T.th?'ค่าเดิมในชีต':'current'})</option>`:'')+list.map(v=>`<option ${c===v?'selected':''}>${v}</option>`).join('')};
+function formHtml(m,hs,ot){
+  const f=UI.form, th=L===T.th, today=TODAY;
+  const sync=`<div class="hint">${th?'ระบบอัปเดตสถานะเครื่องให้อัตโนมัติ: กำลังทดลอง → "กำลังทดลอง" · ซื้อ → "ขายแล้ว" · ไม่ซื้อ/รอพิจารณา → "ในคลัง" (ล้างชื่อลูกค้า) · แก้ประวัติเก่าย้อนหลังจะไม่เปลี่ยนสถานะเครื่อง':'Machine status updates automatically from the latest trial record.'}</div>`;
+  const acts=(save)=>`<div class="fa"><button class="btn" data-act="cancelForm">${th?'ยกเลิก':'Cancel'}</button><button class="btn pri" data-act="${save}">${th?'บันทึก':'Save'}</button></div>`;
+  const resR=(cur)=>`<div class="radios">${['Bought','Not Bought','Pending'].map(k=>`<label style="--c:var(${RS_C[k][0]});--b:var(${RS_C[k][1]})"><input type="radio" name="ff-res" value="${k}" ${cur===k?'checked':''}>${L.res[k]}</label>`).join('')}</div>`;
+  if(f.kind==='start') return `<div class="form"><h4>${th?'เริ่มทดลองกับลูกค้า':'Start a trial'}</h4>
+    ${ot?`<div class="note warnb">⚠ ${th?`เครื่องนี้ยังทดลองค้างอยู่ที่ <b>${esc(ot.client)}</b> (เริ่ม ${fmtD(ot.start)}) — เมื่อบันทึก ระบบจะปิดรายการเดิมเป็น "จบแล้ว / ไม่ซื้อ" ให้อัตโนมัติ`:`Still on trial at ${esc(ot.client)} — saving will close it as Not bought`}</div>`:''}
+    <div class="fg"><div class="f full"><label>${th?'ชื่อลูกค้า / โรงสี *':'Client *'}</label><input id="ff-client" list="clist" value="${esc(f.client||'')}"><datalist id="clist">${[...new Set(S.hist.map(h=>h.client))].map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div>
+    <div class="f"><label>${th?'สถานที่ / จังหวัด':'Location'}</label><input id="ff-loc" value="${esc(f.loc||'')}"></div>
+    <div class="f"><label>${th?'โหมดที่ทดลอง':'Mode'}</label><select id="ff-mode">${['Milled rice','Paddy'].map(x=>`<option ${(f.mode||m.mode)===x?'selected':''}>${x}</option>`).join('')}</select></div>
+    <div class="f"><label>${th?'วันเริ่มทดลอง':'Start date'}</label><input type="date" id="ff-start" value="${f.start||today}"></div>
+    <div class="f full"><label>${th?'หมายเหตุ':'Remark'}</label><input id="ff-rm" value="${esc(f.remark||'')}" placeholder="${th?'ไม่บังคับ':'optional'}"></div></div>${sync}${acts('saveStart')}</div>`;
+  if(f.kind==='close') return `<div class="form"><h4>${th?'ปิดการทดลอง':'End trial'} · ${esc(ot.client)}</h4><div class="note info">${th?`ทดลองมาแล้ว ${days(ot.start)} วัน (เริ่ม ${fmtD(ot.start)})`:`Running ${days(ot.start)} days`}</div>
+    <div class="f"><label>${th?'ผลการทดลอง *':'Result *'}</label>${resR(f.result)}</div>
+    <div class="fg"><div class="f"><label>${th?'วันสิ้นสุดทดลอง':'End date'}</label><input type="date" id="ff-end" value="${f.end||today}"></div>
+    <div class="f"><label>${th?'หมายเหตุ / เหตุผล':'Remark'}</label><input id="ff-rm" value="${esc(f.remark||ot.remark||'')}" placeholder="${th?'เช่น งบไม่พอ, รอใบเสนอราคา':'e.g. budget'}"></div></div>${sync}${acts('saveClose')}</div>`;
+  if(f.kind==='hist'){ const x=f.id?S.hist.find(h=>h.id===f.id):{}; return `<div class="form"><h4>${f.id?(th?'แก้ไขประวัติ':'Edit history'):(th?'เพิ่มประวัติเอง':'Add history')}</h4>
+    <div class="fg"><div class="f full"><label>${th?'ชื่อลูกค้า *':'Client *'}</label><input id="ff-client" value="${esc(x.client||'')}"></div>
+    <div class="f"><label>${th?'สถานที่':'Location'}</label><input id="ff-loc" value="${esc(x.loc||'')}"></div><div class="f"><label>Mode</label><select id="ff-mode">${['Milled rice','Paddy'].map(v=>`<option ${(x.mode||m.mode)===v?'selected':''}>${v}</option>`).join('')}</select></div>
+    <div class="f"><label>${th?'วันเริ่ม':'Start'}</label><input type="date" id="ff-start" value="${x.start||TODAY}"></div><div class="f"><label>${th?'วันสิ้นสุด':'End'}</label><input type="date" id="ff-end" value="${x.end||''}"></div>
+    <div class="f"><label>${th?'สถานะการทดลอง':'Trial status'}</label><select id="ff-status"><option value="In Progress" ${x.status==='In Progress'?'selected':''}>${L.st.Test}</option><option value="Completed" ${x.status==='Completed'?'selected':''}>${th?'จบแล้ว':'Finished'}</option></select></div>
+    <div class="f"><label>${th?'ผล':'Result'}</label><select id="ff-result">${['Pending','Bought','Not Bought'].map(k=>`<option value="${k}" ${(x.result||'Pending')===k?'selected':''}>${L.res[k]}</option>`).join('')}</select></div>
+    <div class="f full"><label>${th?'หมายเหตุ':'Remark'}</label><input id="ff-rm" value="${esc(x.remark||'')}"></div></div>${sync}${acts('saveHist')}</div>`;}
+  if(f.kind==='machine') return `<div class="form"><h4>${th?'แก้ไขข้อมูลเครื่อง':'Edit machine'}</h4>
+    <div class="fg"><div class="f"><label>${th?'ลูกค้าปัจจุบัน':'Client'}</label><input id="mf-client" value="${esc(m.client)}"></div><div class="f"><label>${th?'สถานที่':'Location'}</label><input id="mf-loc" value="${esc(m.loc)}"></div>
+    <div class="f"><label>${th?'สถานะ':'Status'}</label><select id="mf-status">${['Stock','Test','Complete','Broken'].map(k=>`<option value="${k}" ${m.status===k?'selected':''}>${L.st[k]}</option>`).join('')}</select></div>
+    <div class="f"><label>Model</label><select id="mf-model">${optsKeep(['Gen 1','Gen 2'],m.model)}</select></div>
+    <div class="f"><label>Mode</label><select id="mf-mode">${optsKeep(['Milled rice','Paddy'],m.mode)}</select></div>
+    <div class="f"><label>${th?'ประเภท':'Type'}</label><select id="mf-type">${optsKeep(['Lab','Real-time'],m.type)}</select></div>
+    <div class="f"><label>S/N Edge server</label><input id="mf-edge" value="${esc(m.edge)}"></div><div class="f"><label>${th?'วันส่งมอบ':'Delivered'}</label><input type="date" id="mf-deliv" value="${m.deliv}"><span class="hint">${th?'ใส่วันส่งมอบครั้งแรก ระบบคำนวณนัด PM 1–3 ให้':'PM 1–3 dates are scheduled from this'}</span></div></div>
+    <div class="hint">S/N Analyzer ${th?'แก้ไม่ได้ (ใช้ระบุเครื่อง)':'cannot be changed'}</div>${acts('saveMachine')}</div>`;
+  return '';
+}
+
+/* ---------- render ---------- */
+const TITLE=()=>({machines:L['nav.machines'],trials:L['nav.trials'],dash:'Dashboard'})[UI.view];
+function render(keep){
+  const sc0=$('#sc'), y=sc0?sc0.scrollTop:0;
+  $('#page').innerHTML=UI.view==='machines'?vMachines():UI.view==='trials'?vTrials():vDash();
+  $('#ttl').textContent=$('#ttlM').textContent=TITLE();
+  $$('[data-go]').forEach(b=>b.classList.toggle('on',b.dataset.go===UI.view));
+  $$('[data-t]').forEach(e=>e.textContent=L[e.dataset.t]);
+  $('#ctM').textContent=S.machines.length; $('#ctT').textContent=S.hist.filter(h=>h.status==='In Progress').length||'';
+  $('#adminR').innerHTML=UI.admin?`🔓 ${L.adminOut}`:`🔒 ${L.admin}`; $('#adminR').classList.toggle('on',UI.admin);
+  $('#adminM').textContent=UI.admin?'🔓':'🔒'; $('#adminM').classList.toggle('on',UI.admin);
+  $('#langM').textContent=UI.lang==='th'?'EN':'TH';
+  $$('[data-lang]').forEach(b=>b.classList.toggle('on',b.dataset.lang===UI.lang));
+  renderSync();
+  const ab=$('#adminbar'); ab.hidden=!UI.admin; ab.innerHTML=UI.admin?`<b>${L===T.th?'โหมด Admin':'Admin mode'}</b> · ${L===T.th?'แก้ไข เพิ่ม ลบข้อมูลได้':'you can edit data'} <button data-act="admin">${L.adminOut}</button>`:'';
+  if(UI.open) drawer();
+  const sc1=$('#sc'); if(keep&&sc1) sc1.scrollTop=y;
+}
+function openDrawer(sn){UI.open=sn;UI.form=null;drawer();$('#drawer').classList.add('on');$('#scrim').classList.add('on')}
+function closeDrawer(){UI.open=null;UI.form=null;$('#drawer').classList.remove('on');$('#scrim').classList.remove('on')}
+function toast(t){const el=$('#toast');el.textContent=t;el.classList.add('on');clearTimeout(toast.t);toast.t=setTimeout(()=>el.classList.remove('on'),2200)}
+function modal(html){$('#mbox').innerHTML=html;$('#modal').classList.add('on');const i=$('#mbox input');if(i)i.focus()}
+function closeModal(){$('#modal').classList.remove('on')}
+const val=id=>{const e=document.getElementById(id);return e?e.value.trim():''};
+
+/* ---------- events ---------- */
+document.addEventListener('click',e=>{
+  const go=e.target.closest('[data-go]'); if(go){UI.view=go.dataset.go;closeDrawer();render();return}
+  const st=e.target.closest('[data-stat]'); if(st){const k=st.dataset.stat;UI.stF=k;UI.statKey=k;render(true);return}
+  const c=e.target.closest('[data-st]'); if(c){UI.stF=c.dataset.st;UI.statKey=null;render(true);return}
+  const ty=e.target.closest('[data-type]'); if(ty){UI.typeF=ty.dataset.type;render(true);return}
+  const so=e.target.closest('th[data-sort]'); if(so){const k=so.dataset.sort;UI.sort=[k,UI.sort[0]===k?-UI.sort[1]:(k==='use'||k==='deliv'?-1:1)];render(true);return}
+  const tr=e.target.closest('[data-tr]'); if(tr){UI.trTab=tr.dataset.tr;render();return}
+  const rs=e.target.closest('[data-res]'); if(rs){UI.resF=rs.dataset.res;render(true);return}
+  const lg=e.target.closest('[data-lang]'); if(lg){setLang(lg.dataset.lang);return}
+  const tm=e.target.closest('[data-theme-set]'); if(tm){const v=tm.dataset.themeSet;if(v==='auto')document.documentElement.removeAttribute('data-theme');else document.documentElement.setAttribute('data-theme',v);try{localStorage.setItem(THEME_KEY,v)}catch(e){}return}
+  const a=e.target.closest('[data-act]');
+  if(a){act(a.dataset.act,a.dataset.v,e);return}
+  const o=e.target.closest('[data-open]'); if(o){openDrawer(o.dataset.open);return}
 });
-
-const i18n = {
-    th: {
-        menu: "เมนู", overview: "ภาพรวมระบบ", refresh: "รีเฟรชข้อมูล", mainTitle: "เครื่องทั้งหมด",
-        rejectedTitle: "ประวัติการทดลอง",
-        search: "ค้นหา S/N, ลูกค้า, โหมด...", allClients: "-- ลูกค้าทั้งหมด --", reset: "ล้างค่าการค้นหา",
-        total: "รวม", unit: "เครื่อง", updated: "อัปเดตเมื่อ:", days: "วัน",
-        cols: ["S/N Analyzer", "S/N Edge", "Model", "ลูกค้า", "สถานที่", "Mode", "ประเภท", "สถานะ", "ส่งมอบ", "ระยะเวลา"],
-        rejectedCols: ["ชื่อโรงสี/ลูกค้า", "S/N Analyzer", "Model", "Mode", "จังหวัด", "วันเริ่มทดลอง", "วันสิ้นสุดทดลอง", "รวมระยะเวลา", "สถานะทดลอง", "ผลลัพธ์"],
-        rejectedColsCompact: ["ชื่อโรงสี/ลูกค้า", "S/N Analyzer", "Model", "Mode", "จังหวัด", "วันเริ่มทดลอง", "รวมระยะเวลา"],
-        resultOptions: { all: "-- ผลลัพธ์ทั้งหมด --", Pending: "รอพิจารณา", Bought: "ซื้อ", "Not Bought": "ไม่ซื้อ" },
-        stats: ["Lab ทั้งหมด", "Real-time ทั้งหมด", "ในคลัง (Stock)", "ส่งซ่อม (Broken)", "เครื่องเทส (TEST)"],
-        msg: { loading: "กำลังซิงค์ข้อมูล", syncSuccess: "ข้อมูลล่าสุดแล้ว", langChange: "เปลี่ยนเป็นภาษาไทย" },
-        clients: {}
-    },
-    en: {
-        menu: "Menu", overview: "System Overview", refresh: "Refresh Data", mainTitle: "All Machines",
-        rejectedTitle: "Trial History",
-        search: "Search S/N, Client, Mode...", allClients: "-- All Clients --", reset: "Clear Filters",
-        total: "Total", unit: "units", updated: "Updated at:", days: "days",
-        cols: ["S/N Analyzer", "S/N Edge", "Model", "Client", "Location", "Mode", "Type", "Status", "Delivery", "Period"],
-        rejectedCols: ["Customer/Client", "S/N Analyzer", "Model", "Mode", "Province", "Start Date", "End Date", "Total Period", "Trial Status", "Result"],
-        rejectedColsCompact: ["Customer/Client", "S/N Analyzer", "Model", "Mode", "Province", "Start Date", "Total Period"],
-        resultOptions: { all: "-- All Results --", Pending: "Pending", Bought: "Bought", "Not Bought": "Not Bought" },
-        stats: ["Total Lab", "Total Real-time", "In Stock", "Broken/Repair", "Test Units"],
-        msg: { loading: "Syncing Data", syncSuccess: "Data Updated", langChange: "Switched to English" },
-        clients: { "ตัวอย่าง": "Tua-Yang" }
-    }
-};
-
-window.onload = () => {
-    setLanguage(currentLang, true);
-    loadFromCache();
-    fetchData();
-};
-
-// คำนวณคอลัมน์ที่ควรแสดงในตาราง ตาม view ปัจจุบัน + ตัวกรองสถานะทดลอง (ถ้ามาจากการ์ด TEST จะใช้คอลัมน์แบบย่อ)
-function getActiveCols(lang) {
-    if (currentView !== 'all') {
-        return trialStatusQuickFilter === 'In Progress' ? i18n[lang].rejectedColsCompact : i18n[lang].rejectedCols;
-    }
-    return i18n[lang].cols;
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){if($('#modal').classList.contains('on'))closeModal();else closeDrawer()}
+  if(e.key==='Enter'&&e.target.closest('.tcard')&&!e.target.closest('button'))openDrawer(e.target.closest('.tcard').dataset.open)});
+document.addEventListener('input',e=>{const t=e.target;
+  if(t.id==='q'){UI.q=t.value;clearTimeout(UI.qt);UI.qt=setTimeout(()=>{render(true);const q=$('#q');q.focus();q.setSelectionRange(q.value.length,q.value.length)},180)}
+  if(t.id==='q2'){UI.q2=t.value;clearTimeout(UI.qt);UI.qt=setTimeout(()=>{render(true);const q=$('#q2');q.focus();q.setSelectionRange(q.value.length,q.value.length)},180)}});
+document.addEventListener('change',e=>{const t=e.target;
+  if(t.id==='fClient'){UI.clientF=t.value;render(true)} if(t.id==='fMode'){UI.modeF=t.value;render(true)}
+  if(t.name==='ff-res'&&UI.form)UI.form.result=t.value;});
+function setLang(l){UI.lang=l;L=T[l];try{localStorage.setItem(LANG_KEY,l)}catch(e){}render(true);toast(l==='th'?'เปลี่ยนเป็นภาษาไทย':'Switched to English')}
+function act(a,v){
+  const th=L===T.th;
+  if(a==='close'){closeDrawer();return}
+  if(a==='lang'){setLang(UI.lang==='th'?'en':'th');return}
+  if(a==='clearF'){Object.assign(UI,{q:'',stF:'all',typeF:'all',modeF:'all',clientF:'all',statKey:null});render(true);return}
+  if(a==='refresh'){if(!UI.syncing)load().then(ok=>toast(ok?(th?'ข้อมูลล่าสุดแล้ว':'Data updated'):(th?'เชื่อมต่อไม่ได้':'Connection failed')));return}
+  if(a==='admin'){ if(UI.admin){UI.admin=false;UI.pw='';UI.form=null;render(true);toast(th?'ออกจากโหมด Admin แล้ว':'Left Admin mode');return}
+    modal(`<h3>${th?'เข้าสู่ระบบ Admin':'Admin login'}</h3><p>${th?'ใส่รหัสผ่านเพื่อเพิ่ม แก้ไข หรือลบข้อมูล':'Enter the password to add, edit or delete data'}</p><div class="f"><label for="pw">${th?'รหัสผ่าน':'Password'}</label><input type="password" id="pw" autocomplete="current-password"></div><div class="hint" id="pwErr" style="color:var(--broken)"></div><div class="fa"><button class="btn" data-act="mclose">${th?'ยกเลิก':'Cancel'}</button><button class="btn pri" data-act="login" id="loginBtn">${th?'เข้าสู่ระบบ':'Log in'}</button></div>`);return}
+  if(a==='mclose'){closeModal();return}
+  if(a==='login'){login();return}
+  if(a==='retry'){boot(true);return}
+  const m=UI.open&&M(UI.open);
+  if(a==='startTrial'){if(UI.open!==v)openDrawer(v);UI.form={kind:'start'};drawer();$('#drawer .db').scrollTop=0;return}
+  if(a==='closeTrial'){if(UI.open!==v)openDrawer(v);UI.form={kind:'close',result:''};drawer();$('#drawer .db').scrollTop=0;return}
+  if(a==='editMachine'){UI.form={kind:'machine'};drawer();$('#drawer .db').scrollTop=0;return}
+  if(a==='addHist'){UI.form={kind:'hist'};drawer();$('#drawer .db').scrollTop=0;return}
+  if(a==='editHist'){UI.form={kind:'hist',id:v};drawer();$('#drawer .db').scrollTop=0;return}
+  if(a==='cancelForm'){UI.form=null;drawer();return}
+  if(a==='delHist'){const x=S.hist.find(h=>h.id===v);if(!x)return;modal(`<h3>${th?'ลบประวัตินี้?':'Delete this record?'}</h3><p>${esc(x.client)} · ${fmtD(x.start)} – ${x.end?fmtD(x.end):'…'}<br>${th?'ลบแล้วกู้คืนไม่ได้':'This cannot be undone'}${x.status==='In Progress'?`<br><b style="color:var(--test)">${th?'รายการนี้กำลังทดลองอยู่ — สถานะเครื่องจะปรับตามประวัติที่เหลือ':'This trial is active — machine status will follow the remaining history'}</b>`:''}</p><div class="fa"><button class="btn" data-act="mclose">${th?'ยกเลิก':'Cancel'}</button><button class="btn danger" data-act="delOk" data-v="${esc(x.id)}">${th?'ลบ':'Delete'}</button></div>`);return}
+  if(a==='delOk'){closeModal();save('delete',{ID:v},th?'ลบประวัติแล้ว':'Deleted');return}
+  if(a==='quickStatus'){const d={"S/N Analyzer":m.sn,"Status":v};if(v==='Stock'){d["Client name"]='';d["Location"]=''}
+    save('edit_machine',d,v==='Broken'?(th?'เปลี่ยนสถานะเป็น "ส่งซ่อม" แล้ว':'Marked as in repair'):(th?'กลับเข้าคลังแล้ว':'Back in stock'));return}
+  if(a==='saveStart'){const client=val('ff-client');if(!client){toast(th?'กรอกชื่อลูกค้าก่อน':'Client required');return}
+    save('add',{"S/N Analyzer":m.sn,"Client Name":client,"Location":val('ff-loc'),"Start Date":val('ff-start')||TODAY,"End Date":'',"Status":'In Progress',"Result":'Pending',"Remark":val('ff-rm'),"Mode":val('ff-mode'),autoCloseOldTrials:!!openTrial(m.sn),syncMachineStatus:true},th?`เริ่มทดลองที่ ${client} แล้ว`:'Trial started');return}
+  if(a==='saveClose'){const ot=openTrial(m.sn),r=UI.form.result;if(!r){toast(th?'เลือกผลการทดลองก่อน':'Pick a result');return}
+    const end=val('ff-end')||TODAY;if(end<ot.start){toast(th?'วันสิ้นสุดต้องไม่ก่อนวันเริ่ม':'End date is before start');return}
+    save('edit',histPayload({...ot,status:'Completed',result:r,end,remark:val('ff-rm')}),th?`ปิดการทดลองแล้ว · ${L.res[r]}`:`Trial ended · ${L.res[r]}`);return}
+  if(a==='saveHist'){const client=val('ff-client');if(!client){toast(th?'กรอกชื่อลูกค้าก่อน':'Client required');return}
+    const d={sn:m.sn,client,loc:val('ff-loc'),mode:val('ff-mode'),start:val('ff-start'),end:val('ff-end'),status:val('ff-status'),result:val('ff-result'),remark:val('ff-rm')};
+    if(d.end&&d.start&&d.end<d.start){toast(th?'วันสิ้นสุดต้องไม่ก่อนวันเริ่ม':'End date is before start');return}
+    if(UI.form.id) save('edit',histPayload({...d,id:UI.form.id}),th?'แก้ไขประวัติแล้ว':'Saved');
+    else { const p=histPayload(d); delete p.ID; p.autoCloseOldTrials=d.status==='In Progress'&&!!openTrial(m.sn); save('add',p,th?'เพิ่มประวัติแล้ว':'Added'); }
+    return}
+  if(a==='saveMachine'){save('edit_machine',{"S/N Analyzer":m.sn,"Client name":val('mf-client'),"Location":val('mf-loc'),"Status":val('mf-status'),"Model":val('mf-model'),"Mode":val('mf-mode'),"Type":val('mf-type'),"S/N Edge server":val('mf-edge'),"Delivery date":val('mf-deliv')},th?'แก้ไขข้อมูลเครื่องแล้ว':'Machine updated');return}
 }
+const histPayload=x=>({ID:x.id,"S/N Analyzer":x.sn,"Client Name":x.client,"Location":x.loc,"Start Date":x.start,"End Date":x.end||'',"Status":x.status,"Result":x.result,"Remark":x.remark||'',"Mode":x.mode,syncMachineStatus:true});
 
-function setLanguage(lang, silent = false) {
-    currentLang = lang;
-    localStorage.setItem('c2_lang', lang);
-
-    document.querySelectorAll('.lang-btn, .mobile-lang-btn').forEach(b => b.classList.remove('active'));
-    if (document.getElementById(`btn-${lang}`)) document.getElementById(`btn-${lang}`).classList.add('active');
-    if (document.getElementById(`m-btn-${lang}`)) document.getElementById(`m-btn-${lang}`).classList.add('active');
-
-    document.getElementById('m-menu-text').innerText = i18n[lang].menu;
-    document.getElementById('nav-label-ov').innerHTML = `<i class="fas fa-chart-pie"></i> ${i18n[lang].overview}`;
-    document.getElementById('refresh-btn').innerHTML = `<i class="fas fa-sync-alt"></i> ${i18n[lang].refresh}`;
-
-    document.getElementById('main-title').innerText = currentView === 'all' ? i18n[lang].mainTitle : i18n[lang].rejectedTitle;
-    document.getElementById('searchInput').placeholder = i18n[lang].search;
-    document.getElementById('reset-btn').innerHTML = `<i class="fas fa-undo"></i> ${i18n[lang].reset}`;
-
-    const activeCols = getActiveCols(lang);
-    document.querySelector('#tableHead tr').innerHTML = activeCols.map(c => `<th>${c}</th>`).join('');
-
-    updateResultFilterOptions(lang);
-
-    updateClientDropdown();
-    updateStats();
-    renderTable();
-
-    if (!silent) Toast.fire({ icon: 'info', title: i18n[lang].msg.langChange });
+/* ---------- เชื่อมต่อ Apps Script ---------- */
+async function api(action,data,pw){
+  const r=await fetch(scriptURL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action,data,adminPassword:pw})});
+  return r.json();
 }
+async function login(){const th=L===T.th,pw=val('pw'),btn=$('#loginBtn'),err=$('#pwErr');
+  if(!pw){err.textContent=th?'กรุณากรอกรหัสผ่าน':'Enter password';return}
+  btn.disabled=true;btn.textContent=th?'กำลังตรวจสอบ…':'Checking…';
+  try{const j=await api('verify_admin',null,pw);
+    if(j.status!=='success'){err.textContent=j.message||(th?'รหัสผ่านไม่ถูกต้อง':'Wrong password');btn.disabled=false;btn.textContent=th?'เข้าสู่ระบบ':'Log in';return}
+    UI.pw=pw;UI.admin=true;closeModal();render(true);toast(th?'เข้าสู่โหมด Admin แล้ว':'Admin mode on');
+  }catch(e){err.textContent=th?'เชื่อมต่อไม่ได้ ลองใหม่อีกครั้ง':'Connection failed';btn.disabled=false;btn.textContent=th?'เข้าสู่ระบบ':'Log in'}}
+function setBusy(b){UI.busy=b;$('#drawer').classList.toggle('busy',b);renderSync()}
+async function save(action,data,okMsg){const th=L===T.th;if(UI.busy)return;
+  setBusy(true);
+  try{const j=await api(action,data,UI.pw);
+    if(j.status!=='success'){const msg=j.message||(th?'บันทึกไม่สำเร็จ':'Save failed');
+      if(/รหัสผ่าน|ล็อก|Admin/.test(msg)){UI.admin=false;UI.pw='';UI.form=null}
+      setBusy(false);render(true);modal(`<h3>${th?'บันทึกไม่สำเร็จ':'Save failed'}</h3><p>${esc(msg)}</p><div class="fa"><button class="btn pri" data-act="mclose">${th?'ตกลง':'OK'}</button></div>`);return}
+    UI.form=null;setBusy(false);await load();toast(j.message||okMsg);
+  }catch(e){setBusy(false);modal(`<h3>${th?'เชื่อมต่อไม่ได้':'Connection failed'}</h3><p>${th?'ยังไม่ได้บันทึก กรุณาลองใหม่อีกครั้ง':'Nothing was saved. Please try again.'}</p><div class="fa"><button class="btn pri" data-act="mclose">${th?'ตกลง':'OK'}</button></div>`)}}
+function renderSync(){const th=L===T.th;
+  const t=UI.busy?(th?'กำลังบันทึก…':'Saving…'):UI.syncing?(th?'กำลังซิงค์…':'Syncing…'):'';
+  const html=t?`<span class="syncpill"><span class="dot"></span>${t}</span>`:UI.err?`<span style="color:var(--broken)">${esc(UI.err)}</span>`:(UI.synced?`${L.updated} ${esc(UI.synced)}`:'');
+  $('#sync').innerHTML=html;$('#syncR').innerHTML=html;
+  $$('[data-act=refresh] svg').forEach(s=>s.classList.toggle('spin',UI.syncing))}
+async function load(){const th=L===T.th;UI.syncing=true;renderSync();
+  try{const r=await fetch(scriptURL+'?app=panolyzer&v='+Date.now(),{cache:'no-store',redirect:'follow'});const data=await r.json();
+    if(!data||data.status==='error')throw new Error(data&&data.message||'error');
+    ingest(data);TODAY=ymdOf(new Date());
+    UI.synced=new Date().toLocaleString(th?'th-TH':'en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',hour12:false});UI.err=null;
+    try{localStorage.setItem(CACHE_KEY,JSON.stringify({machines:data.machines||[],histories:data.histories||[]}));localStorage.setItem(SYNC_KEY,UI.synced)}catch(e){}
+    UI.syncing=false;render(true);return true;
+  }catch(e){UI.syncing=false;UI.err=th?'เชื่อมต่อไม่ได้ · แสดงข้อมูลล่าสุดที่เก็บไว้':'Offline · showing saved data';render(true);return false}}
 
-function translateClient(name) {
-    if (!name || name === "-") return "-";
-    return (currentLang === 'en' && i18n.en.clients[name]) ? i18n.en.clients[name] : name;
+/* ---------- เริ่มแอป: หน้า loading อย่างน้อย ~3.5 วินาที ระหว่างนั้นดึงข้อมูลไปพร้อมกัน ---------- */
+function loaderSteps(){const th=L===T.th;return th?['กำลังเชื่อมต่อ…','กำลังโหลดข้อมูลเครื่อง…','กำลังโหลดประวัติการทดลอง…','พร้อมใช้งาน']:['Connecting…','Loading machines…','Loading trial history…','Ready']}
+function stepTo(t){const st=$('#ldStep');st.style.opacity=0;setTimeout(()=>{st.textContent=t;st.style.opacity=1},150)}
+async function boot(retry){
+  const ld=$('#ld'),steps=loaderSteps();ld.classList.remove('out');$('#ldErr').hidden=true;$('#ldStep').textContent=steps[0];
+  let i=0;clearInterval(boot.t);boot.t=setInterval(()=>{if(i<2){i++;stepTo(steps[i])}},950);
+  const minShow=new Promise(r=>setTimeout(r,retry?1200:2850));
+  const [ok]=await Promise.all([load(),minShow]);clearInterval(boot.t);
+  if(!ok&&!S.machines.length){stepTo(L===T.th?'เชื่อมต่อไม่ได้ ตรวจสอบอินเทอร์เน็ตแล้วลองใหม่':'Cannot connect. Check your connection and retry.');$('#ldErr').hidden=false;return}
+  stepTo(steps[3]);setTimeout(()=>ld.classList.add('out'),700);
 }
-
-// อัปเดตตัวเลือกใน resultFilter dropdown ให้เป็นภาษาที่เลือก (เดิม dropdown นี้ hardcode เป็นภาษาไทยอย่างเดียว)
-function updateResultFilterOptions(lang) {
-    const sel = document.getElementById('resultFilter');
-    const currentVal = sel.value;
-    const opts = i18n[lang].resultOptions;
-    sel.innerHTML = Object.keys(opts).map(key =>
-        `<option value="${key}" ${key === currentVal ? 'selected' : ''}>${opts[key]}</option>`
-    ).join('');
-}
-
-function formatDate(dateStr) {
-    if (!dateStr || dateStr === "-") return "-";
-    try {
-        const date = new Date(dateStr);
-        if (isNaN(date.getTime())) return dateStr;
-        return date.toLocaleDateString(currentLang === 'th' ? 'th-TH' : 'en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    } catch (e) { return dateStr; }
-}
-
-function toggleSidebar() {
-    const sb = document.getElementById('sidebar');
-    const ov = document.getElementById('sidebarOverlay');
-    sb.classList.toggle('active');
-    ov.classList.toggle('active');
-    document.body.style.overflow = sb.classList.contains('active') ? 'hidden' : 'auto';
-}
-
-// --- ส่วนที่ 1: วางทับฟังก์ชัน loadFromCache เดิม ---
-function loadFromCache() {
-    const cached = localStorage.getItem(CACHE_KEY);
-    const lastSync = localStorage.getItem("last_sync_time");
-    if (cached) {
-        const parsedData = JSON.parse(cached);
-        
-        // ดักจับข้อมูลทั้งแบบเก่าและแบบใหม่
-        if (Array.isArray(parsedData)) {
-            machines = parsedData;
-            rejectedMachines = [];
-            histories = [];
-            buildMachineIndex();
-        } else {
-            machines = parsedData.machines || [];
-            histories = parsedData.histories || [];
-            buildMachineIndex(); // สร้าง index ใหม่ทุกครั้งที่ machines เปลี่ยน
-            rejectedMachines = getTrialHistoryList(); // คำนวณอัตโนมัติจาก histories แทนการอ่านจากชีตตรงๆ
-        }
-        
-        if (lastSync) document.getElementById('updateTime').innerText = `${i18n[currentLang].updated} ${lastSync}`;
-        updateClientDropdown(); updateStats(); renderTable();
-    }
-}
-
-// --- ส่วนที่ 2: วางทับฟังก์ชัน fetchData เดิม ---
-async function fetchData(options = {}) {
-    const silent = options.silent === true; // silent = true ใช้ตอนอัปเดตเบื้องหลัง (add/edit/delete) ไม่ต้องโชว์หน้าโหลดเต็มจอ
-    const loader = document.getElementById('app-loader');
-
-    if (!silent) {
-        loader.classList.remove('loader-hidden');
-        document.getElementById('loader-msg').innerText = i18n[currentLang].msg.loading;
-    }
-    const minimumDisplayTime = silent ? Promise.resolve() : new Promise(resolve => setTimeout(resolve, 2000));
-
-    try {
-        const [response] = await Promise.all([
-            fetch(scriptURL + "?app=panolyzer&v=" + new Date().getTime(), { cache: "no-store", redirect: "follow" }),
-            minimumDisplayTime
-        ]);
-        
-        const data = await response.json();
-        console.log("Raw data from server:", data); // ตรวจสอบรูปแบบข้อมูลใน Console
-
-        if (data) {
-            // ดักจับข้อมูลทั้งแบบเก่าและแบบใหม่
-            if (Array.isArray(data)) {
-                // กรณีที่ API ยังส่งมาเป็นข้อมูลแบบเก่า
-                machines = data;
-                rejectedMachines = [];
-                histories = [];
-                buildMachineIndex();
-                console.warn("⚠️ ข้อมูล API เป็นเวอร์ชันเก่า: ตารางทำงานได้ แต่จะไม่พบประวัติ History");
-            } else {
-                // กรณีที่ API อัปเดตเป็นเวอร์ชันใหม่เรียบร้อยแล้ว
-                machines = data.machines || [];
-                histories = data.histories || [];
-                buildMachineIndex(); // สร้าง index ใหม่ทุกครั้งที่ machines เปลี่ยน
-                rejectedMachines = getTrialHistoryList(); // คำนวณอัตโนมัติจาก histories (Status=Completed, ทุก Result)
-            }
-            
-            const now = new Date().toLocaleString(currentLang === 'th' ? 'th-TH' : 'en-GB', { hour12: false, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-
-            localStorage.setItem(CACHE_KEY, JSON.stringify({ machines, histories }));
-            localStorage.setItem("last_sync_time", now);
-
-            document.getElementById('updateTime').innerText = `${i18n[currentLang].updated} ${now}`;
-            updateClientDropdown(); 
-            updateStats(); 
-            renderTable();
-
-            if (!silent) {
-                Swal.close();
-                Toast.fire({ icon: 'success', title: i18n[currentLang].msg.syncSuccess });
-            }
-        }
-        if (!silent) loader.classList.add('loader-hidden');
-    }
-    catch (e) {
-        console.error("Fetch error details:", e);
-        if (!silent) {
-            loader.classList.add('loader-hidden');
-            Swal.fire({ icon: 'error', title: 'Connection Error', text: 'ไม่สามารถเชื่อมต่อข้อมูลได้' });
-        } else {
-            Toast.fire({ icon: 'error', title: 'อัปเดตข้อมูลล้มเหลว กรุณารีเฟรชใหม่' });
-        }
-    }
-}
-
-function switchView(view) {
-    currentView = view;
-    trialStatusQuickFilter = 'all'; // รีเซ็ตเสมอเมื่อเข้าเมนูปกติ เพื่อให้เห็นทุกสถานะการทดลอง
-    document.getElementById('main-title').innerText = view === 'all' ? i18n[currentLang].mainTitle : i18n[currentLang].rejectedTitle;
-    updateFilterVisibility();
-
-    const activeCols = getActiveCols(currentLang);
-    document.querySelector('#tableHead tr').innerHTML = activeCols.map(c => `<th>${c}</th>`).join('');
-
-    document.getElementById('searchInput').value = '';
-    document.getElementById('clientFilter').value = 'all';
-    document.getElementById('resultFilter').value = 'all';
-    document.getElementById('modeFilter').value = 'all';
-
-    renderTable();
-    // เดิม toggle แบบไม่มีเงื่อนไข (สมมติว่าเรียกจากเมนูใน sidebar ที่เปิดอยู่เสมอ)
-    // ปรับให้ปิดเฉพาะตอนที่ sidebar เปิดอยู่จริง เพื่อรองรับ bottom nav บนมือถือที่เรียก switchView()
-    // ตอน sidebar ปิดอยู่แล้ว (ไม่งั้นจะกลายเป็นเปิด sidebar ขึ้นมาโดยไม่ตั้งใจ)
-    const sb = document.getElementById('sidebar');
-    if (window.innerWidth <= 992 && sb && sb.classList.contains('active')) toggleSidebar();
-}
-
-// โชว์/ซ่อน dropdown ตัวกรองด้านบน ตาม view ปัจจุบัน + ว่ากำลังกรองเฉพาะ 'กำลังทดลอง' จากการ์ด TEST อยู่หรือไม่
-function updateFilterVisibility() {
-    const isCompactTest = currentView === 'rejected' && trialStatusQuickFilter === 'In Progress';
-    document.getElementById('modeFilter').style.display = (currentView === 'all' || isCompactTest) ? 'inline-block' : 'none';
-    document.getElementById('resultFilter').style.display = (currentView === 'rejected' && !isCompactTest) ? 'inline-block' : 'none';
-}
-
-// ป้องกัน XSS: escape อักขระที่มีความหมายพิเศษใน HTML ก่อนแสดงผลข้อมูลที่มาจาก Sheets/ฟอร์ม
-function escapeHtml(str) {
-    if (str === null || str === undefined) return '';
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-}
-
-// กำหนด class ของ badge ตามข้อความสถานะ (ใช้ร่วมกันทุกที่ที่ต้องโชว์สถานะเครื่อง ป้องกันสีไม่ตรงกับความหมายจริง)
-function getStatusBadgeClass(status) {
-    const s = String(status || "").toLowerCase();
-    if (s.includes('complete')) return 'bg-complete';
-    if (s.includes('broken')) return 'bg-broken';
-    if (s.includes('test') || s.includes('progress')) return 'bg-test';
-    return 'bg-stock';
-}
-
-// ฟังก์ชันหาค่า Key ที่อาจพิมพ์หลายแบบ
-const findKey = (obj, keys) => {
-    const foundKey = keys.find(k => obj.hasOwnProperty(k) && obj[k] !== "");
-    return foundKey ? obj[foundKey] : "-";
-};
-
-// แปลงค่า Result ให้เป็น 1 ใน 3 สถานะเสมอ (รองรับข้อมูลเก่าที่ Result เป็นค่าว่าง = ถือเป็น Pending)
-function normalizeResult(r) {
-    const v = String(r || "").trim();
-    if (v === "Bought" || v === "Not Bought") return v;
-    return "Pending";
-}
-
-// สร้าง Map ของ machines (S/N -> ข้อมูลเครื่อง) ไว้ล่วงหน้า เพื่อให้ lookup เร็วขึ้น (O(1) ต่อครั้ง)
-// ต้องเรียก buildMachineIndex() ใหม่ทุกครั้งที่ machines เปลี่ยน (ทำใน loadFromCache/fetchData)
-let machineIndex = new Map();
-function buildMachineIndex() {
-    machineIndex = new Map(machines.map(m => [String(m["S/N Analyzer"]), m]));
-}
-
-// ค้นหาข้อมูล Model ของเครื่องจาก S/N Analyzer (อ้างจากชีต Panolyzer Data)
-function getModelBySn(sn) {
-    const found = machineIndex.get(String(sn));
-    return (found && found["Model"]) ? found["Model"] : "-";
-}
-
-// สร้างรายการ "ประวัติทดลอง" จากประวัติเครื่อง (Machine History)
-// แสดงทุกสถานะ (ทั้งที่กำลังทดลองอยู่ และที่เสร็จสิ้นแล้ว)
-function getTrialHistoryList() {
-    return histories.map(h => ({
-        ...h,
-        "Model": getModelBySn(h["S/N Analyzer"]),
-        "Result": normalizeResult(h["Result"]),
-        "Total Period": calculateTrialDays(h["Start Date"], h["End Date"], h["Status"])
-    }));
-}
-
-function renderTable() {
-    clearTimeout(window.renderTimer);
-    window.renderTimer = setTimeout(() => {
-        const search = document.getElementById('searchInput').value.toLowerCase().trim();
-        const client = document.getElementById('clientFilter').value;
-        const mode = document.getElementById('modeFilter').value;
-        const resultFilterVal = document.getElementById('resultFilter').value;
-        const body = document.getElementById('tableBody');
-        const labels = getActiveCols(currentLang);
-
-        let sourceData = currentView === 'all' ? machines : rejectedMachines;
-
-        if (!sourceData || sourceData.length === 0) {
-            body.innerHTML = `<tr><td colspan="${labels.length}" style="text-align:center; padding: 50px; color:#999;">ไม่พบข้อมูลในระบบ</td></tr>`;
-            document.getElementById('totalCounter').innerText = `${i18n[currentLang].total} 0 ${i18n[currentLang].unit}`;
-            return;
-        }
-
-        let sortedData = [...sourceData];
-        if (currentView === 'rejected') {
-            // เรียง "ไม่ซื้อ" ขึ้นก่อนเสมอ แล้วค่อยเรียงตามระยะเวลาทดลองมากไปน้อยภายในกลุ่มเดียวกัน
-            sortedData.sort((a, b) => {
-                const aFlag = normalizeResult(a["Result"]) === "Not Bought" ? 0 : 1;
-                const bFlag = normalizeResult(b["Result"]) === "Not Bought" ? 0 : 1;
-                if (aFlag !== bFlag) return aFlag - bFlag;
-                return (parseInt(b["Total Period"]) || 0) - (parseInt(a["Total Period"]) || 0);
-            });
-        } else {
-            sortedData.sort((a, b) => {
-                let valA = parseInt(a["Period"] || a["Total Period"] || a["รวมทั้งหมด"]) || 0;
-                let valB = parseInt(b["Period"] || b["Total Period"] || b["รวมทั้งหมด"]) || 0;
-                return valB - valA;
-            });
-        }
-
-        const filtered = sortedData.filter(m => {
-            if (currentView === 'all') {
-                const isNotSorter = String(m["Type"] || "").toLowerCase() !== 'sorter';
-                const matchSearch = !search || Object.values(m).some(v => String(v).toLowerCase().includes(search));
-                const matchClient = (client === 'all' || m["Client name"] === client);
-                const matchMode = (mode === 'all' || m["Mode"] === mode);
-                return isNotSorter && matchSearch && matchClient && matchMode;
-            } else {
-                const matchSearch = !search || Object.values(m).some(v => String(v).toLowerCase().includes(search));
-                const currentClientName = findKey(m, ["Client Name", "Client name", "ชื่อโรงสี/ลูกค้า"]);
-                const matchClient = (client === 'all' || currentClientName === client);
-                const matchResult = (resultFilterVal === 'all' || normalizeResult(m["Result"]) === resultFilterVal);
-                const matchTrialStatus = (trialStatusQuickFilter === 'all') ||
-                    (trialStatusQuickFilter === 'In Progress' ? String(m["Status"] || "").trim() !== 'Completed' : String(m["Status"] || "").trim() === trialStatusQuickFilter);
-                const matchMode = (trialStatusQuickFilter !== 'In Progress') || (mode === 'all' || m["Mode"] === mode);
-                return matchSearch && matchClient && matchResult && matchTrialStatus && matchMode;
-            }
-        });
-
-        if (filtered.length === 0) {
-            body.innerHTML = `<tr><td colspan="${labels.length}" style="text-align:center; padding: 50px; color:#999;">ไม่พบข้อมูลที่ค้นหา</td></tr>`;
-            document.getElementById('totalCounter').innerText = `${i18n[currentLang].total} 0 ${i18n[currentLang].unit}`;
-            return;
-        }
-
-        const fragment = document.createDocumentFragment();
-
-        filtered.forEach(m => {
-            const tr = document.createElement('tr');
-            
-            // ดึงค่า S/N ออกมาเพื่อใช้ทำ Event Click ให้แถว
-            const snVal = currentView === 'all' ? (m["S/N Analyzer"] || "") : findKey(m, ["SN Analyzer", "S/N Analyzer", "S/N"]);
-            
-            // เพิ่ม Hover Effect และ Onclick
-            tr.style.cursor = 'pointer';
-            tr.classList.add('table-row-hover'); // อาจจะต้องเพิ่ม .table-row-hover:hover { background: #f8fbf9; } ใน CSS
-            tr.onclick = () => openMachineHistoryModal(snVal);
-
-            if (currentView === 'all') {
-                const s = (m["Status"] || "Stock").trim();
-                const bClass = getStatusBadgeClass(s);
-                const p = parseInt(m["Period"]) || 0;
-                const periodStyle = p > 365 ? 'color:#c9701e; font-weight:bold;' : '';
-
-                tr.innerHTML = `
-                    <td data-label="${labels[0]}"><div class="val-text">${escapeHtml(m["S/N Analyzer"]) || "-"}</div></td>
-                    <td data-label="${labels[1]}"><div class="val-text">${escapeHtml(m["S/N Edge server"]) || "-"}</div></td>
-                    <td data-label="${labels[2]}"><div class="val-text">${escapeHtml(m["Model"]) || "-"}</div></td>
-                    <td data-label="${labels[3]}"><div class="val-text">${escapeHtml(translateClient(m["Client name"]))}</div></td>
-                    <td data-label="${labels[4]}"><div class="val-text">${escapeHtml(m["Location"]) || "-"}</div></td>
-                    <td data-label="${labels[5]}"><div class="val-text"><span class="mode-tag">${escapeHtml(m["Mode"]) || "-"}</span></div></td>
-                    <td data-label="${labels[6]}"><div class="val-text">${escapeHtml(m["Type"]) || "-"}</div></td>
-                    <td data-label="${labels[7]}"><div class="val-text"><span class="badge ${bClass}">${escapeHtml(s.toUpperCase())}</span></div></td>
-                    <td data-label="${labels[8]}"><div class="val-text">${escapeHtml(formatDate(m["Delivery date"]))}</div></td>
-                    <td data-label="${labels[9]}"><div class="val-text" style="${periodStyle}">${p} ${i18n[currentLang].days}</div></td>
-                `;
-            } else {
-                const clientName = findKey(m, ["Client Name", "Client name", "ชื่อโรงสี/ลูกค้า"]);
-                const locVal = findKey(m, ["Location", "location", "จังหวัด"]);
-                const startDate = findKey(m, ["Start Date", "Start date", "วันเริ่มทดลอง"]);
-                const endDate = findKey(m, ["End Date", "End date", "วันสิ้นสุดทดลอง"]);
-                const totalPeriod = findKey(m, ["Total Period", "Total period", "รวมทั้งหมด", "รวมทั้งหมด(วัน)", "Period"]);
-                const resultVal = normalizeResult(m["Result"]);
-                const resultBadge = resultVal === 'Bought' ? '<span class="badge bg-complete">ซื้อ</span>' :
-                                     resultVal === 'Not Bought' ? '<span class="badge bg-broken">ไม่ซื้อ</span>' :
-                                     '<span class="badge bg-test">รอพิจารณา</span>';
-                const trialStatusVal = String(m["Status"] || "").trim();
-                const trialStatusBadge = trialStatusVal === 'Completed'
-                    ? '<span class="badge bg-complete">เสร็จสิ้น</span>'
-                    : '<span class="badge bg-stock">กำลังทดลอง</span>';
-
-                if (trialStatusQuickFilter === 'In Progress') {
-                    // มุมมองย่อจากการ์ด TEST: ซ่อนวันสิ้นสุดทดลอง/สถานะทดลอง/ผลลัพธ์ เพราะทุกแถวคือ "กำลังทดลอง" อยู่แล้ว ไม่มีข้อมูลใหม่จะโชว์
-                    tr.innerHTML = `
-                        <td data-label="${labels[0]}"><div class="val-text" style="font-weight:bold; color:#2C4C3A;">${escapeHtml(translateClient(clientName))}</div></td>
-                        <td data-label="${labels[1]}"><div class="val-text">${escapeHtml(snVal)}</div></td>
-                        <td data-label="${labels[2]}"><div class="val-text">${escapeHtml(m["Model"]) || "-"}</div></td>
-                        <td data-label="${labels[3]}"><div class="val-text"><span class="mode-tag">${escapeHtml(m["Mode"]) || "-"}</span></div></td>
-                        <td data-label="${labels[4]}"><div class="val-text">${escapeHtml(locVal)}</div></td>
-                        <td data-label="${labels[5]}"><div class="val-text">${escapeHtml(formatDate(startDate))}</div></td>
-                        <td data-label="${labels[6]}"><div class="val-text" style="color:#d64545; font-weight:bold;">${escapeHtml(totalPeriod)} ${i18n[currentLang].days}</div></td>
-                    `;
-                } else {
-                    tr.innerHTML = `
-                        <td data-label="${labels[0]}"><div class="val-text" style="font-weight:bold; color:#2C4C3A;">${escapeHtml(translateClient(clientName))}</div></td>
-                        <td data-label="${labels[1]}"><div class="val-text">${escapeHtml(snVal)}</div></td>
-                        <td data-label="${labels[2]}"><div class="val-text">${escapeHtml(m["Model"]) || "-"}</div></td>
-                        <td data-label="${labels[3]}"><div class="val-text"><span class="mode-tag">${escapeHtml(m["Mode"]) || "-"}</span></div></td>
-                        <td data-label="${labels[4]}"><div class="val-text">${escapeHtml(locVal)}</div></td>
-                        <td data-label="${labels[5]}"><div class="val-text">${escapeHtml(formatDate(startDate))}</div></td>
-                        <td data-label="${labels[6]}"><div class="val-text">${trialStatusVal === 'Completed' ? escapeHtml(formatDate(endDate)) : '-'}</div></td>
-                        <td data-label="${labels[7]}"><div class="val-text" style="color:#d64545; font-weight:bold;">${escapeHtml(totalPeriod)} ${i18n[currentLang].days}</div></td>
-                        <td data-label="${labels[8]}"><div class="val-text">${trialStatusBadge}</div></td>
-                        <td data-label="${labels[9]}"><div class="val-text">${resultBadge}</div></td>
-                    `;
-                }
-            }
-            fragment.appendChild(tr);
-        });
-
-        body.innerHTML = '';
-        body.appendChild(fragment);
-        document.getElementById('totalCounter').innerText = `${i18n[currentLang].total} ${filtered.length} ${i18n[currentLang].unit}`;
-    }, 150);
-}
-
-function updateStats() {
-    const activeMachines = machines.filter(m => String(m["Type"] || "").toLowerCase() !== 'sorter');
-    const count = (sk, tk) => activeMachines.filter(m => {
-        const s = String(m["Status"] || "").toLowerCase();
-        const t = String(m["Type"] || "").toLowerCase();
-        if (sk === 'LAB') return t.includes('lab');
-        if (sk === 'REAL') return t.includes('real-time');
-        return s.includes(sk.toLowerCase()) && (tk ? t.includes(tk.toLowerCase()) : true);
-    }).length;
-
-    // นับ "เครื่องเทส (TEST)" จากสถานะใน Machine_History (Status != Completed = กำลังทดลอง)
-    // แทนการเช็ค Status ในชีต Panolyzer Data แบบเดิม แล้วนับเป็นจำนวนเครื่อง (ไม่ซ้ำ S/N)
-    const testingSNs = [...new Set(
-        histories.filter(h => String(h["Status"] || "").trim() !== "Completed")
-                 .map(h => String(h["S/N Analyzer"]))
-    )];
-    const testingType = (sn) => {
-        const mach = machineIndex.get(sn);
-        return String((mach && mach["Type"]) || "").toLowerCase();
-    };
-    const testTotal = testingSNs.length;
-    const testLab = testingSNs.filter(sn => testingType(sn).includes('lab')).length;
-    const testReal = testingSNs.filter(sn => testingType(sn).includes('real-time')).length;
-
-    const st = {
-        L: count('LAB'), R: count('REAL'),
-        S: { n: count('stock'), l: count('stock', 'lab'), r: count('stock', 'real') },
-        B: { n: count('broken'), l: count('broken', 'lab'), r: count('broken', 'real') },
-        T: { n: testTotal, l: testLab, r: testReal }
-    };
-
-    const sl = i18n[currentLang].stats;
-    document.getElementById('statsBox').innerHTML = `
-            <div class="stat-card card-lab" onclick="switchView('all'); quickFilter('Lab')"><span class="stat-label">${sl[0]}</span><span class="stat-val">${st.L}</span></div>
-            <div class="stat-card card-real" onclick="switchView('all'); quickFilter('Real-time')"><span class="stat-label">${sl[1]}</span><span class="stat-val">${st.R}</span></div>
-            <div class="stat-card card-stock" onclick="switchView('all'); quickFilter('Stock')"><span class="stat-label">${sl[2]}</span><div style="text-align:right"><span class="stat-val">${st.S.n}</span><span class="stat-detail">L: ${st.S.l} | R: ${st.S.r}</span></div></div>
-            <div class="stat-card card-broken" onclick="switchView('all'); quickFilter('Broken')"><span class="stat-label">${sl[3]}</span><div style="text-align:right"><span class="stat-val">${st.B.n}</span><span class="stat-detail">L: ${st.B.l} | R: ${st.B.r}</span></div></div>
-            <div class="stat-card card-test" onclick="switchView('rejected'); quickFilterTrialStatus('In Progress')"><span class="stat-label">${sl[4]}</span><div style="text-align:right"><span class="stat-val">${st.T.n}</span><span class="stat-detail">L: ${st.T.l} | R: ${st.T.r}</span></div></div>
-        `;
-}
-
-function updateClientDropdown() {
-    const activeMachines = machines.filter(m => String(m["Type"] || "").toLowerCase() !== 'sorter');
-    const clients1 = activeMachines.map(m => m["Client name"]);
-    const clients2 = rejectedMachines.map(m => findKey(m, ["Client Name", "Client name", "ชื่อโรงสี/ลูกค้า"]));
-
-    const cls = [...new Set([...clients1, ...clients2])].filter(Boolean).sort();
-    const sel = document.getElementById('clientFilter');
-    const currentVal = sel.value;
-    sel.innerHTML = `<option value="all">${i18n[currentLang].allClients}</option>`;
-    cls.forEach(c => {
-        const isSelected = c === currentVal ? 'selected' : '';
-        sel.innerHTML += `<option value="${escapeHtml(c)}" ${isSelected}>${escapeHtml(translateClient(c))}</option>`;
-    });
-}
-
-function resetFilters() {
-    document.getElementById('searchInput').value = '';
-    document.getElementById('clientFilter').value = 'all';
-    document.getElementById('modeFilter').value = 'all';
-    document.getElementById('resultFilter').value = 'all';
-    trialStatusQuickFilter = 'all';
-
-    updateFilterVisibility();
-
-    const activeCols = getActiveCols(currentLang);
-    document.querySelector('#tableHead tr').innerHTML = activeCols.map(c => `<th>${c}</th>`).join('');
-
-    renderTable();
-}
-
-function quickFilter(status) {
-    document.getElementById('searchInput').value = status;
-    document.getElementById('clientFilter').value = 'all';
-    document.getElementById('modeFilter').value = 'all';
-    renderTable();
-}
-
-// ใช้ตอนคลิกจากการ์ด "เครื่องเทส (TEST)" เพื่อกรองเฉพาะเครื่องที่สถานะ "กำลังทดลอง" อยู่ในหน้าประวัติทดลอง
-function quickFilterTrialStatus(status) {
-    trialStatusQuickFilter = status;
-    document.getElementById('resultFilter').value = 'all';
-    document.getElementById('clientFilter').value = 'all';
-    document.getElementById('modeFilter').value = 'all';
-    document.getElementById('searchInput').value = '';
-
-    updateFilterVisibility();
-
-    const activeCols = getActiveCols(currentLang);
-    document.querySelector('#tableHead tr').innerHTML = activeCols.map(c => `<th>${c}</th>`).join('');
-
-    renderTable();
-}
-
-/* =========================================================================================
-   MACHINE HISTORY & CRUD SYSTEM
-   ระบบจัดการประวัติการเคลื่อนย้าย
-========================================================================================= */
-
-// ฟังก์ชันคำนวณวัน
-function calculateTrialDays(start, end, status) {
-    if (!start) return "-";
-    const startDate = new Date(start);
-    let endDate = new Date(); // ถ้า In Progress ให้ใช้วันปัจจุบัน
-    
-    if (status === 'Completed' && end) {
-        endDate = new Date(end);
-    }
-    
-    const diffTime = Math.abs(endDate - startDate);
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return diffDays;
-}
-
-// 1. ฟังก์ชันเปิดหน้าต่างแสดงรายละเอียดประวัติ
-function openMachineHistoryModal(serialNumber) {
-    if (!serialNumber || serialNumber === "-") return;
-
-    // หาข้อมูลเครื่อง และ ประวัติของเครื่องนี้
-    const machineInfo = machineIndex.get(String(serialNumber)) || rejectedMachines.find(m => findKey(m, ["SN Analyzer", "S/N Analyzer"]) === serialNumber) || {};
-    const machineHistories = histories.filter(h => String(h["S/N Analyzer"]) === String(serialNumber));
-
-    // สร้างรายการประวัติ — ใช้ card แบบ flex/grid (ไม่ใช่ <table>) เพื่อให้อ่านง่ายทั้งจอเล็ก/ใหญ่
-    // โดยไม่ต้องพึ่งการ "ยุบตาราง" ของ CSS media query ซึ่งออกแบบมาเฉพาะตารางหลักของแอปเท่านั้น
-    let historyRowsHTML = machineHistories.map(h => {
-        const days = calculateTrialDays(h["Start Date"], h["End Date"], h["Status"]);
-        const statusBadge = h["Status"] === 'Completed' ? `<span class="badge bg-complete">เสร็จสิ้น</span>` : `<span class="badge bg-test">กำลังทดลอง</span>`;
-        const resultValNorm = normalizeResult(h["Result"]);
-        const resultText = resultValNorm === 'Bought' ? `<b style="color: #2f9e58;">ซื้อแล้ว</b>` : (resultValNorm === 'Not Bought' ? `<b style="color: #d64545;">ไม่ซื้อ</b>` : `<b style="color:#e08e0b;">รอพิจารณา</b>`);
-
-        // Escape เครื่องหมายคำพูดสำหรับใส่ใน onClick
-        const hDataStr = encodeURIComponent(JSON.stringify(h));
-
-        return `
-        <div class="history-card">
-            <div class="history-card-head">
-                <div class="history-period">
-                    ${escapeHtml(formatDate(h["Start Date"]))} &rarr; ${escapeHtml(formatDate(h["End Date"]))}
-                    &nbsp;<span class="history-duration">(${days} วัน)</span>
-                </div>
-                <div class="history-actions">
-                    ${isAdmin ? `
-                        <button class="icon-action-btn" onclick="editHistoryModal('${hDataStr}')" style="background:var(--action-warning);" title="แก้ไข"><i class="fas fa-edit"></i></button>
-                        <button class="icon-action-btn" onclick="deleteHistory('${h["ID"]}')" style="background:var(--action-danger);" title="ลบ"><i class="fas fa-trash"></i></button>
-                    ` : `<i class="fas fa-lock" style="color:#bbb;" title="Admin เท่านั้น"></i>`}
-                </div>
-            </div>
-            <div class="history-client-row">
-                <span class="history-client-name">${escapeHtml(h["Client Name"])}</span>
-                <span class="history-location">${escapeHtml(h["Location"])}</span>
-            </div>
-            <div class="history-status-row">
-                ${statusBadge}
-                ${resultText}
-                ${h["Remark"] ? `<span class="history-remark">${escapeHtml(h["Remark"])}</span>` : ''}
-            </div>
-        </div>`;
-    }).join('');
-
-    Swal.fire({
-        title: `<div style="color:var(--c2-dark); font-size:19px;">ประวัติเครื่อง: ${escapeHtml(serialNumber)}</div>`,
-        html: `
-            <div style="text-align: left;">
-                <!-- ข้อมูลเครื่อง -->
-                <div class="machine-info-card">
-                    <div class="machine-info-head">
-                        <div class="info-grid">
-                            <div class="info-item"><span class="info-label">ลูกค้า</span><span class="info-value">${escapeHtml(machineInfo["Client name"]) || "-"}</span></div>
-                            <div class="info-item"><span class="info-label">สถานที่</span><span class="info-value">${escapeHtml(machineInfo["Location"]) || "-"}</span></div>
-                            <div class="info-item"><span class="info-label">Mode</span><span class="info-value">${escapeHtml(machineInfo["Mode"]) || "-"}</span></div>
-                            <div class="info-item"><span class="info-label">Type</span><span class="info-value">${escapeHtml(machineInfo["Type"]) || "-"}</span></div>
-                            <div class="info-item"><span class="info-label">Model</span><span class="info-value">${escapeHtml(machineInfo["Model"]) || "-"}</span></div>
-                            <div class="info-item"><span class="info-label">Status ปัจจุบัน</span><span class="badge ${getStatusBadgeClass(machineInfo["Status"])}">${escapeHtml(String(machineInfo["Status"] || "-").toUpperCase())}</span></div>
-                        </div>
-                        ${isAdmin ? `
-                            <button class="icon-action-btn" style="width:auto; padding:0 12px; gap:6px;" onclick="editMachineModal('${escapeHtml(serialNumber)}')" title="แก้ไขข้อมูลเครื่อง">
-                                <i class="fas fa-pen"></i>
-                            </button>
-                        ` : ''}
-                    </div>
-                </div>
-
-                <!-- ประวัติ -->
-                <div class="history-section-head">
-                    <h4>ประวัติการทดลอง (History)</h4>
-                    ${isAdmin ? `
-                        <button onclick="addHistoryModal('${serialNumber}')" style="background: var(--action-success); color: white; border: none; padding: 8px 14px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 12px; min-height:36px;">
-                            <i class="fas fa-plus"></i> เพิ่มประวัติ
-                        </button>
-                    ` : `
-                        <button onclick="adminAuth()" style="background: var(--action-muted); color: white; border: none; padding: 8px 14px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 12px; min-height:36px;" title="ต้องล็อกอินเป็น Admin ก่อน">
-                            <i class="fas fa-lock"></i> เพิ่มประวัติ (Admin เท่านั้น)
-                        </button>
-                    `}
-                </div>
-                <div class="history-list">
-                    ${historyRowsHTML || '<div class="history-empty">ยังไม่มีประวัติการเคลื่อนย้าย</div>'}
-                </div>
-            </div>
-        `,
-        width: '640px',
-        showCloseButton: true,
-        showConfirmButton: false
-    });
-}
-
-// 2. ฟังก์ชันแสดงฟอร์มสำหรับ เพิ่มประวัติ
-async function addHistoryModal(serialNumber) {
-    if (!isAdmin) {
-        Swal.fire({ icon: 'warning', title: 'สิทธิ์ไม่เพียงพอ', text: 'กรุณาล็อกอินเป็น Admin ก่อนเพิ่มข้อมูล' });
-        return;
-    }
-
-    // เช็คก่อนว่าเครื่องนี้มีประวัติ "กำลังทดลอง" ค้างอยู่ไหม (เผื่อ Admin ลืมปิดของเก่า)
-    const oldTrial = histories.find(h => String(h["S/N Analyzer"]) === String(serialNumber) && String(h["Status"] || "").trim() === "In Progress");
-    let autoClose = false;
-
-    if (oldTrial) {
-        const confirmClose = await Swal.fire({
-            icon: 'warning',
-            title: 'พบการทดลองค้างอยู่',
-            html: `เครื่องนี้มีประวัติ <b>"กำลังทดลอง"</b> ค้างอยู่<br>
-                   ลูกค้า: <b>${escapeHtml(oldTrial["Client Name"]) || '-'}</b> &nbsp;|&nbsp; เริ่มทดลอง: ${escapeHtml(formatDate(oldTrial["Start Date"]))}
-                   <br><br>
-                   ระบบจะ<b>ปิดรายการเดิมให้เป็น "เสร็จสิ้น / ไม่ซื้อ"</b> โดยอัตโนมัติ (วันที่สิ้นสุด = วันนี้) ก่อนเพิ่มรายการใหม่<br><br>
-                   ต้องการดำเนินการต่อหรือไม่?`,
-            showCancelButton: true,
-            confirmButtonText: 'ดำเนินการต่อ',
-            cancelButtonText: 'ยกเลิก',
-            confirmButtonColor: '#c9701e'
-        });
-
-        if (!confirmClose.isConfirmed) {
-            openMachineHistoryModal(serialNumber);
-            return;
-        }
-        autoClose = true;
-    }
-
-    Swal.fire({
-        title: '<i class="fas fa-plus-circle" style="color:var(--action-success);"></i> เพิ่มประวัติใหม่',
-        html: getHistoryFormHTML(serialNumber),
-        width: '560px',
-        showCancelButton: true,
-        confirmButtonText: 'บันทึก',
-        cancelButtonText: 'ยกเลิก',
-        preConfirm: () => getHistoryFormData()
-    }).then((result) => {
-        if (result.isConfirmed) {
-            const payload = result.value;
-            payload.autoCloseOldTrials = autoClose;
-            sendHistoryData("add", payload);
-        } else if (result.isDismissed) {
-            openMachineHistoryModal(serialNumber); // กลับไปหน้าเดิมถ้ายกเลิก
-        }
-    });
-}
-
-// 3. ฟังก์ชันแสดงฟอร์มสำหรับ แก้ไขประวัติ
-function editHistoryModal(hDataStr) {
-    if (!isAdmin) {
-        Swal.fire({ icon: 'warning', title: 'สิทธิ์ไม่เพียงพอ', text: 'กรุณาล็อกอินเป็น Admin ก่อนแก้ไขข้อมูล' });
-        return;
-    }
-    const h = JSON.parse(decodeURIComponent(hDataStr));
-    Swal.fire({
-        title: '<i class="fas fa-edit" style="color:var(--action-warning);"></i> แก้ไขประวัติ',
-        html: getHistoryFormHTML(h["S/N Analyzer"], h),
-        width: '560px',
-        showCancelButton: true,
-        confirmButtonText: 'อัปเดต',
-        cancelButtonText: 'ยกเลิก',
-        preConfirm: () => getHistoryFormData(h["ID"])
-    }).then((result) => {
-        if (result.isConfirmed) {
-            sendHistoryData("edit", result.value);
-        } else if (result.isDismissed) {
-            openMachineHistoryModal(h["S/N Analyzer"]);
-        }
-    });
-}
-
-// 4. ฟังก์ชันสำหรับ ลบประวัติ
-function deleteHistory(id) {
-    if (!isAdmin) {
-        Swal.fire({ icon: 'warning', title: 'สิทธิ์ไม่เพียงพอ', text: 'กรุณาล็อกอินเป็น Admin ก่อนลบข้อมูล' });
-        return;
-    }
-    Swal.fire({
-        title: 'ยืนยันการลบ?',
-        text: "คุณไม่สามารถกู้คืนข้อมูลนี้ได้!",
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonColor: '#d64545',
-        confirmButtonText: 'ใช่, ลบทิ้งเลย',
-        cancelButtonText: 'ยกเลิก'
-    }).then((result) => {
-        if (result.isConfirmed) {
-            sendHistoryData("delete", { ID: id });
-        }
-    });
-}
-
-// โครงสร้าง HTML ของฟอร์ม (ใช้ร่วมกันทั้ง Add และ Edit)
-function getHistoryFormHTML(sn, data = {}) {
-    // ตัดเวลาออกจาก Date string (ถ้ามี) เพื่อใส่ใน input type="date"
-    const startD = data["Start Date"] ? new Date(data["Start Date"]).toISOString().split('T')[0] : '';
-    const endD = data["End Date"] ? new Date(data["End Date"]).toISOString().split('T')[0] : '';
-    const inputStyle = "width:100%; height:40px; margin:0; box-sizing:border-box;";
-
-    return `
-        <div style="text-align: left; font-size: 14px;">
-            <input type="hidden" id="h-sn" value="${escapeHtml(sn)}">
-
-            <div class="form-section">
-                <div class="form-section-title"><i class="fas fa-user"></i> ข้อมูลลูกค้า</div>
-                <div class="form-row">
-                    <div class="form-field">
-                        <label>Client Name (ชื่อลูกค้า)</label>
-                        <input id="h-client" class="swal2-input" style="${inputStyle}" value="${escapeHtml(data["Client Name"]) || ''}">
-                    </div>
-                    <div class="form-field">
-                        <label>Location (สถานที่/จังหวัด)</label>
-                        <input id="h-location" class="swal2-input" style="${inputStyle}" value="${escapeHtml(data["Location"]) || ''}">
-                    </div>
-                    <div class="form-field">
-                        <label>Mode ที่ทดลอง</label>
-                        <select id="h-mode" class="swal2-select" style="${inputStyle} font-size:14px; padding:0 10px;">
-                            ${buildSelectOptions(data["Mode"], ["Milled rice", "Paddy"])}
-                        </select>
-                    </div>
-                </div>
-            </div>
-
-            <div class="form-section">
-                <div class="form-section-title"><i class="fas fa-calendar-alt"></i> ระยะเวลาทดลอง</div>
-                <div class="form-row">
-                    <div class="form-field">
-                        <label>Start Date</label>
-                        <input type="date" id="h-start" class="swal2-input" style="${inputStyle}" value="${startD}">
-                    </div>
-                    <div class="form-field">
-                        <label>End Date</label>
-                        <input type="date" id="h-end" class="swal2-input" style="${inputStyle}" value="${endD}">
-                    </div>
-                </div>
-            </div>
-
-            <div class="form-section">
-                <div class="form-section-title"><i class="fas fa-flag"></i> สถานะและผลลัพธ์</div>
-                <div class="form-row">
-                    <div class="form-field">
-                        <label>Status</label>
-                        <select id="h-status" class="swal2-select" style="${inputStyle} font-size:14px; padding:0 10px;">
-                            <option value="In Progress" ${data["Status"] === 'In Progress' ? 'selected' : ''}>In Progress (กำลังทดลอง)</option>
-                            <option value="Completed" ${data["Status"] === 'Completed' ? 'selected' : ''}>Completed (เสร็จสิ้น)</option>
-                        </select>
-                    </div>
-                    <div class="form-field">
-                        <label>Result</label>
-                        <select id="h-result" class="swal2-select" style="${inputStyle} font-size:14px; padding:0 10px;">
-                            <option value="Pending" ${(!data["Result"] || data["Result"] === 'Pending') ? 'selected' : ''}>Pending (รอพิจารณา)</option>
-                            <option value="Bought" ${data["Result"] === 'Bought' ? 'selected' : ''}>Bought (ซื้อ)</option>
-                            <option value="Not Bought" ${data["Result"] === 'Not Bought' ? 'selected' : ''}>Not Bought (ไม่ซื้อ)</option>
-                        </select>
-                    </div>
-                </div>
-            </div>
-
-            <div class="form-section">
-                <div class="form-section-title"><i class="fas fa-sticky-note"></i> หมายเหตุ</div>
-                <input id="h-remark" class="swal2-input" style="${inputStyle}" value="${escapeHtml(data["Remark"]) || ''}" placeholder="เหตุผล/หมายเหตุเพิ่มเติม (ไม่บังคับ)">
-            </div>
-
-            <div style="padding:10px 12px; background:#f8fbf9; border-radius:8px; border:1px solid #e0f2e5;">
-                <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; font-weight:bold; color:var(--c2-dark); margin:0;">
-                    <input type="checkbox" id="h-sync" checked style="width:16px; height:16px; margin:0;">
-                    ซิงค์สถานะ/ลูกค้า/สถานที่/Mode ของเครื่องนี้ในชีตหลักให้อัตโนมัติ
-                </label>
-                <div style="font-size:11px; color:#888; margin-top:4px; padding-left:24px;">
-                    กำลังทดลอง → Status เครื่องเปลี่ยนเป็น Test + sync Mode ตามที่ทดลอง • เสร็จสิ้น+ซื้อ → Complete • เสร็จสิ้น+ไม่ซื้อ → กลับเป็น Stock
-                </div>
-            </div>
-        </div>
-    `;
-}
-
-// ฟังก์ชันดึงค่าจากฟอร์ม
-function getHistoryFormData(id = null) {
-    const data = {
-        "S/N Analyzer": document.getElementById('h-sn').value,
-        "Client Name": document.getElementById('h-client').value,
-        "Location": document.getElementById('h-location').value,
-        "Start Date": document.getElementById('h-start').value,
-        "End Date": document.getElementById('h-end').value,
-        "Status": document.getElementById('h-status').value,
-        "Result": document.getElementById('h-result').value,
-        "Mode": document.getElementById('h-mode').value,
-        "Remark": document.getElementById('h-remark').value,
-        "syncMachineStatus": document.getElementById('h-sync').checked
-    };
-    if (id) data.ID = id;
-    
-    // ตรวจสอบข้อมูลเบื้องต้น
-    if (!data["Client Name"]) {
-        Swal.showValidationMessage('กรุณากรอกชื่อลูกค้า');
-        return false;
-    }
-    return data;
-}
-
-/* =========================================================================================
-   แก้ไขข้อมูลเครื่องโดยตรง (แทนการเข้าไปแก้ในหลังบ้าน/Google Sheets) — Admin เท่านั้น
-========================================================================================= */
-
-function editMachineModal(serialNumber) {
-    if (!isAdmin) {
-        Swal.fire({ icon: 'warning', title: 'สิทธิ์ไม่เพียงพอ', text: 'กรุณาล็อกอินเป็น Admin ก่อนแก้ไขข้อมูลเครื่อง' });
-        return;
-    }
-    const machineInfo = machineIndex.get(String(serialNumber)) || {};
-
-    Swal.fire({
-        title: `<i class="fas fa-pen" style="color:var(--action-info); font-size:18px;"></i> แก้ไขข้อมูลเครื่อง: ${escapeHtml(serialNumber)}`,
-        html: getMachineFormHTML(serialNumber, machineInfo),
-        showCancelButton: true,
-        confirmButtonText: 'บันทึก',
-        cancelButtonText: 'ยกเลิก',
-        width: '560px',
-        preConfirm: () => getMachineFormData(serialNumber)
-    }).then((result) => {
-        if (result.isConfirmed) {
-            sendMachineEditData(result.value, serialNumber);
-        } else if (result.isDismissed) {
-            openMachineHistoryModal(serialNumber);
-        }
-    });
-}
-
-// สร้าง <option> list ให้ dropdown โดยถ้าค่าปัจจุบันไม่ตรงกับตัวเลือกมาตรฐานเป๊ะๆ (เช่น สะกดต่างในชีตเดิม)
-// จะเติม option พิเศษที่ selected ไว้ก่อน เพื่อไม่ให้ข้อมูลเดิมถูกเปลี่ยนโดยไม่ตั้งใจถ้า Admin ไม่ได้แก้ค่านี้
-function buildSelectOptions(currentVal, standardOptions) {
-    const cur = String(currentVal || "").trim();
-    const isKnown = standardOptions.includes(cur);
-    let html = standardOptions.map(opt => `<option value="${opt}" ${opt === cur ? 'selected' : ''}>${opt}</option>`).join('');
-    if (cur && !isKnown) {
-        html = `<option value="${escapeHtml(cur)}" selected>${escapeHtml(cur)} (ค่าเดิมในชีต)</option>` + html;
-    }
-    return html;
-}
-
-function getMachineFormHTML(sn, m) {
-    const inputStyle = "width:100%; height:40px; margin:0; box-sizing:border-box;";
-
-    return `
-        <div style="text-align:left; font-size:14px;">
-            <div class="form-section">
-                <div class="form-section-title"><i class="fas fa-user"></i> ผู้ใช้งานปัจจุบัน</div>
-                <div class="form-row">
-                    <div class="form-field">
-                        <label>ชื่อลูกค้า (Client name)</label>
-                        <input id="mf-client" class="swal2-input" style="${inputStyle}" value="${escapeHtml(m["Client name"]) || ''}">
-                    </div>
-                    <div class="form-field">
-                        <label>สถานที่ (Location)</label>
-                        <input id="mf-location" class="swal2-input" style="${inputStyle}" value="${escapeHtml(m["Location"]) || ''}">
-                    </div>
-                </div>
-            </div>
-
-            <div class="form-section">
-                <div class="form-section-title"><i class="fas fa-microchip"></i> รายละเอียดเครื่อง</div>
-                <div class="form-row">
-                    <div class="form-field">
-                        <label>Status</label>
-                        <select id="mf-status" class="swal2-select" style="${inputStyle} font-size:14px; padding:0 10px;">
-                            ${buildSelectOptions(m["Status"], ["Stock", "Test", "In Progress", "Complete", "Broken"])}
-                        </select>
-                    </div>
-                    <div class="form-field">
-                        <label>Model</label>
-                        <select id="mf-model" class="swal2-select" style="${inputStyle} font-size:14px; padding:0 10px;">
-                            ${buildSelectOptions(m["Model"], ["Gen 1", "Gen 2"])}
-                        </select>
-                    </div>
-                    <div class="form-field">
-                        <label>Mode</label>
-                        <select id="mf-mode" class="swal2-select" style="${inputStyle} font-size:14px; padding:0 10px;">
-                            ${buildSelectOptions(m["Mode"], ["Milled rice", "Paddy"])}
-                        </select>
-                    </div>
-                    <div class="form-field">
-                        <label>Type</label>
-                        <select id="mf-type" class="swal2-select" style="${inputStyle} font-size:14px; padding:0 10px;">
-                            ${buildSelectOptions(m["Type"], ["Lab", "Real-time"])}
-                        </select>
-                    </div>
-                </div>
-            </div>
-
-            <div class="form-section">
-                <div class="form-section-title"><i class="fas fa-info-circle"></i> ข้อมูลอื่นๆ</div>
-                <div class="form-row">
-                    <div class="form-field">
-                        <label>S/N Edge server</label>
-                        <input id="mf-edge" class="swal2-input" style="${inputStyle}" value="${escapeHtml(m["S/N Edge server"]) || ''}">
-                    </div>
-                    <div class="form-field">
-                        <label>Delivery date</label>
-                        <input type="date" id="mf-delivery" class="swal2-input" style="${inputStyle}" value="${m["Delivery date"] ? new Date(m["Delivery date"]).toISOString().split('T')[0] : ''}">
-                    </div>
-                </div>
-            </div>
-
-            <div style="font-size:11px; color:#999;"><i class="fas fa-lock"></i> ไม่สามารถแก้ไข S/N Analyzer ได้จากหน้านี้ (ใช้เป็นตัวระบุหลักของเครื่อง)</div>
-        </div>
-    `;
-}
-
-function getMachineFormData(sn) {
-    return {
-        "S/N Analyzer": sn,
-        "Client name": document.getElementById('mf-client').value,
-        "Location": document.getElementById('mf-location').value,
-        "Status": document.getElementById('mf-status').value,
-        "Model": document.getElementById('mf-model').value,
-        "Mode": document.getElementById('mf-mode').value,
-        "Type": document.getElementById('mf-type').value,
-        "S/N Edge server": document.getElementById('mf-edge').value,
-        "Delivery date": document.getElementById('mf-delivery').value
-    };
-}
-
-async function sendMachineEditData(payload, serialNumber) {
-    Swal.fire({ title: 'กำลังบันทึกข้อมูลเครื่อง...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-
-    try {
-        const response = await fetch(scriptURL, {
-            method: 'POST',
-            body: JSON.stringify({ action: "edit_machine", data: payload, adminPassword: adminPasswordCache }),
-            headers: { "Content-Type": "text/plain;charset=utf-8" }
-        });
-
-        const result = await response.json();
-
-        if (result.status === "success") {
-            Swal.close();
-            await fetchData({ silent: true });
-            Toast.fire({ icon: 'success', title: result.message || 'อัปเดตข้อมูลเครื่องแล้ว' });
-            openMachineHistoryModal(serialNumber);
-        } else {
-            Swal.fire('ข้อผิดพลาด!', result.message, 'error');
-        }
-    } catch (error) {
-        console.error("Error saving machine data:", error);
-        Swal.fire('ไม่สามารถเชื่อมต่อได้', 'กรุณาลองใหม่อีกครั้ง', 'error');
-    }
-}
-
-// 5. ฟังก์ชันส่งข้อมูลไปยัง Google Apps Script (POST)
-async function sendHistoryData(action, payload) {
-    const snToReopen = payload["S/N Analyzer"] || (action === "delete" ? histories.find(h => h.ID === payload.ID)?.["S/N Analyzer"] : null);
-
-    Swal.fire({
-        title: 'กำลังบันทึกข้อมูล...',
-        allowOutsideClick: false,
-        didOpen: () => Swal.showLoading()
-    });
-
-    try {
-        const response = await fetch(scriptURL, {
-            method: 'POST',
-            body: JSON.stringify({ action: action, data: payload, adminPassword: adminPasswordCache }),
-            headers: { "Content-Type": "text/plain;charset=utf-8" } // ใช้ text/plain เลี่ยงปัญหา CORS Preflight
-        });
-        
-        const result = await response.json();
-        
-        if (result.status === "success") {
-            Swal.close();
-            await fetchData({ silent: true }); // อัปเดตข้อมูลเบื้องหลัง ไม่โชว์หน้าโหลดเต็มจอเหมือนเข้าครั้งแรก
-            Toast.fire({ icon: 'success', title: result.message || 'Update data complete' });
-            // เปิดหน้าต่าง S/N เดิมกลับขึ้นมาให้ดูความเปลี่ยนแปลงทันที (ไม่ต้องหน่วงเวลาแล้ว)
-            if (snToReopen) openMachineHistoryModal(snToReopen);
-        } else {
-            Swal.fire('ข้อผิดพลาด!', result.message, 'error');
-        }
-    } catch (error) {
-        console.error("Error saving history:", error);
-        Swal.fire('ไม่สามารถเชื่อมต่อได้', 'กรุณาลองใหม่อีกครั้ง', 'error');
-    }
-}
-
-/* =========================================================================================
-   DASHBOARD สรุปภาพรวมการทดลอง
-========================================================================================= */
-
-let dashboardChartInstance = null;
-
-// คำนวณสถิติทั้งหมดสำหรับ Dashboard
-// "ขายแล้ว" อ้างจากสถานะเครื่องจริงในชีต Panolyzer Data (Status = Complete) ไม่ใช่ Result ในประวัติทดลอง
-function getDashboardStats() {
-    const activeMachines = machines.filter(m => String(m["Type"] || "").toLowerCase() !== 'sorter');
-    const soldCount = activeMachines.filter(m => String(m["Status"] || "").toLowerCase().includes('complete')).length;
-
-    const completedTrials = histories.filter(h => String(h["Status"] || "").trim() === "Completed");
-    const inProgress = histories.filter(h => String(h["Status"] || "").trim() !== "Completed");
-
-    const notBought = completedTrials.filter(h => normalizeResult(h["Result"]) === "Not Bought");
-    const pending = completedTrials.filter(h => normalizeResult(h["Result"]) === "Pending");
-
-    return {
-        soldCount: soldCount,
-        inProgressCount: inProgress.length,
-        notBoughtCount: notBought.length,
-        pendingCount: pending.length
-    };
-}
-
-function dashboardKpiCard(label, value, subText, color, bg, icon) {
-    return `
-        <div style="background:${bg}; border-radius:14px; padding:16px; border-left:5px solid ${color}; box-shadow:0 2px 6px rgba(0,0,0,0.04);">
-            <div style="font-size:11px; font-weight:800; color:${color}; text-transform:uppercase; letter-spacing:.5px;">
-                <i class="fas ${icon}"></i> ${label}
-            </div>
-            <div style="font-size:28px; font-weight:900; color:${color}; margin-top:6px; line-height:1;">${value}</div>
-            ${subText ? `<div style="font-size:11px; color:${color}; opacity:.75; font-weight:700; margin-top:3px;">${subText}</div>` : ''}
-        </div>
-    `;
-}
-
-function dashboardLegendRow(color, label, count, pct) {
-    return `
-        <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
-            <span style="width:13px; height:13px; border-radius:4px; background:${color}; display:inline-block; flex-shrink:0;"></span>
-            <span style="min-width:80px; font-weight:700; color:#201E1D;">${label}</span>
-            <span style="color:#666; font-size:13px;">${count} เครื่อง <b style="color:${color};">(${pct}%)</b></span>
-        </div>
-    `;
-}
-
-function showDashboard() {
-    const s = getDashboardStats();
-    const total = s.soldCount + s.notBoughtCount + s.pendingCount;
-    const pct = (n) => total > 0 ? Math.round((n / total) * 100) : 0;
-
-    const COLOR_BOUGHT = "#2e7d32";
-    const COLOR_NOTBOUGHT = "#c62828";
-    const COLOR_PENDING = "#d4a017";
-    const COLOR_PROGRESS = "#2f6fb0";
-
-    Swal.fire({
-        title: `<div style="color:var(--c2-dark); font-size:22px; font-weight:800;"><i class="fas fa-chart-pie"></i> Dashboard ภาพรวมการทดลอง</div>`,
-        html: `
-            <div style="text-align:left;">
-                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(135px,1fr)); gap:12px; margin-bottom:20px;">
-                    ${dashboardKpiCard('ขายแล้ว', s.soldCount, total > 0 ? pct(s.soldCount) + '% ของทั้งหมด' : '', COLOR_BOUGHT, '#e8f5e9', 'fa-check-circle')}
-                    ${dashboardKpiCard('ไม่ซื้อ', s.notBoughtCount, total > 0 ? pct(s.notBoughtCount) + '% ของทั้งหมด' : '', COLOR_NOTBOUGHT, '#fdedec', 'fa-times-circle')}
-                    ${dashboardKpiCard('รอพิจารณา', s.pendingCount, total > 0 ? pct(s.pendingCount) + '% ของทั้งหมด' : '', COLOR_PENDING, '#fff9db', 'fa-hourglass-half')}
-                    ${dashboardKpiCard('กำลังทดลองอยู่', s.inProgressCount, 'ยังไม่เสร็จสิ้น', COLOR_PROGRESS, '#e3f2fd', 'fa-vial')}
-                </div>
-
-                <div style="background:#fff; border:1px solid #eee; border-radius:16px; padding:18px;">
-                    <div style="font-weight:800; color:var(--c2-dark); margin-bottom:14px; font-size:14px;">
-                        สรุปผลรวม (${total} เครื่อง) — ขายแล้วดูจากสถานะเครื่องจริง, ไม่ซื้อ/รอพิจารณาดูจากผลการทดลอง
-                    </div>
-                    ${total > 0 ? `
-                        <div style="display:flex; align-items:center; gap:24px; flex-wrap:wrap; justify-content:center;">
-                            <div style="width:190px; height:190px; position:relative;">
-                                <canvas id="dashDoughnut"></canvas>
-                            </div>
-                            <div>
-                                ${dashboardLegendRow(COLOR_BOUGHT, 'ขายแล้ว', s.soldCount, pct(s.soldCount))}
-                                ${dashboardLegendRow(COLOR_NOTBOUGHT, 'ไม่ซื้อ', s.notBoughtCount, pct(s.notBoughtCount))}
-                                ${dashboardLegendRow(COLOR_PENDING, 'รอพิจารณา', s.pendingCount, pct(s.pendingCount))}
-                            </div>
-                        </div>
-                    ` : `<div style="text-align:center; color:#999; padding:30px 0;">ยังไม่มีข้อมูล</div>`}
-                </div>
-            </div>
-        `,
-        width: '680px',
-        showCloseButton: true,
-        showConfirmButton: false,
-        didOpen: () => {
-            if (total === 0) return;
-            const ctx = document.getElementById('dashDoughnut');
-            if (dashboardChartInstance) dashboardChartInstance.destroy();
-            dashboardChartInstance = new Chart(ctx, {
-                type: 'doughnut',
-                data: {
-                    labels: ['ขายแล้ว', 'ไม่ซื้อ', 'รอพิจารณา'],
-                    datasets: [{
-                        data: [s.soldCount, s.notBoughtCount, s.pendingCount],
-                        backgroundColor: [COLOR_BOUGHT, COLOR_NOTBOUGHT, COLOR_PENDING],
-                        borderWidth: 3,
-                        borderColor: '#ffffff',
-                        hoverOffset: 6
-                    }]
-                },
-                options: {
-                    cutout: '68%',
-                    responsive: true,
-                    maintainAspectRatio: true,
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: {
-                            callbacks: {
-                                label: (ctx) => `${ctx.label}: ${ctx.raw} เครื่อง (${pct(ctx.raw)}%)`
-                            }
-                        }
-                    }
-                }
-            });
-        }
-    });
-}
-/* =========================================================================================
-   MOBILE BOTTOM NAV — additive UI sync only.
-   Does not modify any data/API/business logic above; simply wraps switchView() and
-   showDashboard() so the mobile bottom tab bar highlights the active view correctly,
-   including when a view change is triggered from the sidebar or a stat card.
-========================================================================================= */
-function setActiveBottomNav(id) {
-    document.querySelectorAll('.bottom-nav-item').forEach(el => el.classList.remove('active'));
-    const el = document.getElementById(id);
-    if (el) el.classList.add('active');
-}
-
-(function () {
-    const _switchView = switchView;
-    switchView = function (view) {
-        _switchView(view);
-        setActiveBottomNav(view === 'all' ? 'bnav-all' : 'bnav-rejected');
-    };
-
-    const _showDashboard = showDashboard;
-    showDashboard = function () {
-        _showDashboard();
-        setActiveBottomNav('bnav-dashboard');
-    };
+(function init(){
+  try{const l=localStorage.getItem(LANG_KEY);if(l==='en'||l==='th'){UI.lang=l;L=T[l]}}catch(e){}
+  try{const t=localStorage.getItem(THEME_KEY);if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}
+  try{const c=JSON.parse(localStorage.getItem(CACHE_KEY)||'null');if(c){ingest(c);UI.synced=localStorage.getItem(SYNC_KEY)||''}}catch(e){}
+  render();boot(false);
+})();
 })();

@@ -1,157 +1,67 @@
 <!DOCTYPE html>
 <html lang="th">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="theme-color" content="#3F654D">
-    <title>Panolyzer Management by C2TECH</title>
-
-    <link rel="preconnect" href="https://cdnjs.cloudflare.com">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="preconnect" href="https://cdn.jsdelivr.net">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@300;400;500;600;700&display=swap"
-        rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/@sweetalert2/theme-minimal/minimal.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-    <link rel="stylesheet" href="style.css" />
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2C4C3A">
+<title>Panolyzer Management · C2TECH</title>
+<link rel="icon" type="image/png" href="img/icon-192.png">
+<link rel="apple-touch-icon" href="img/icon-192.png">
+<link rel="preload" as="image" href="img/logo-512.webp">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="style.css?v=20261101a">
 </head>
-
 <body>
-    <!-- Loading screen -->
-    <div id="app-loader">
-        <div class="loader-container">
-            <div class="logo-wrapper">
-                <img src="img/logo.png" alt="Panolyzer Logo" class="chibi-logo">
-                <div class="loader-ring"></div>
-            </div>
-            <div class="loader-text" id="loader-msg">Panolyzer Management</div>
-        </div>
+<div class="app">
+  <aside class="rail" aria-label="เมนูหลัก">
+    <div class="logo"><img id="logoW" src="img/c2tech-white.png" alt="C2TECH"><small>Panolyzer Management</small></div>
+    <button class="nav" data-go="dash"><svg class="ms" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Dashboard</span></button>
+    <button class="nav" data-go="machines"><svg class="ms" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg><span data-t="nav.machines"></span><span class="ct num" id="ctM"></span></button>
+    <button class="nav" data-go="trials"><svg class="ms" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3"/></svg><span data-t="nav.trials"></span><span class="ct num" id="ctT"></span></button>
+    <div class="grow"></div>
+    <div class="foot">
+      <div class="sync" style="color:#B9CDBF" id="syncR"></div>
+      <button data-act="refresh"><svg class="ms" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg><span data-t="refresh"></span></button>
+      <button data-act="admin" id="adminR"></button>
+      <div class="seg"><button data-lang="th">TH</button><button data-lang="en">EN</button></div>
     </div>
+  </aside>
 
-    <!-- Mobile top bar: brand + language + admin access -->
-    <div class="mobile-top-bar">
-        <button class="menu-btn" onclick="toggleSidebar()">
-            <i class="fas fa-bars"></i> <span id="m-menu-text">เมนู</span>
-        </button>
-        <div class="top-bar-actions">
-            <i class="fas fa-lock admin-login-btn icon-btn" onclick="adminAuth()" title="Admin Login"></i>
-            <div class="mobile-lang">
-                <button class="mobile-lang-btn" id="m-btn-th" onclick="setLanguage('th')">TH</button>
-                <button class="mobile-lang-btn" id="m-btn-en" onclick="setLanguage('en')">EN</button>
-            </div>
-            <div class="top-bar-brand">
-                <div class="top-bar-title">
-                    <span class="name">Panolyzer</span>
-                    <span class="ver">C2TECH v0.4.0</span>
-                </div>
-            </div>
-        </div>
+  <div class="main">
+    <div class="mtop"><img id="logoM" src="img/c2tech-white.png" alt="C2TECH"><h1 id="ttlM"></h1>
+      <button data-act="refresh" aria-label="รีเฟรช"><svg class="ms" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg></button>
+      <button data-act="lang" id="langM">EN</button>
+      <button data-act="admin" id="adminM" aria-label="Admin"></button>
     </div>
+    <header class="top"><h1 id="ttl"></h1><span class="sp"></span><span class="sync" id="sync"></span>
+      <div class="seg" role="group" aria-label="ธีม"><button data-theme-set="light">☀</button><button data-theme-set="auto">A</button><button data-theme-set="dark">☾</button></div>
+    </header>
+    <div class="adminbar" id="adminbar" hidden></div>
+    <main class="page" id="page"></main>
+  </div>
+</div>
 
-    <!-- Mobile bottom navigation: primary views within thumb reach -->
-    <nav class="bottom-nav">
-        <div class="bottom-nav-inner">
-            <button class="bottom-nav-item active" id="bnav-all" onclick="switchView('all')">
-                <i class="fas fa-server"></i>
-                <span data-i18n="all">เครื่องทั้งหมด</span>
-            </button>
-            <button class="bottom-nav-item" id="bnav-rejected" onclick="switchView('rejected')">
-                <i class="fas fa-history"></i>
-                <span data-i18n="rejected">ประวัติทดลอง</span>
-            </button>
-            <button class="bottom-nav-item" id="bnav-dashboard" onclick="showDashboard()">
-                <i class="fas fa-chart-pie"></i>
-                <span>Dashboard</span>
-            </button>
-        </div>
-    </nav>
+<nav class="bnav" aria-label="เมนูหลัก">
+  <button data-go="dash"><svg class="ms" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Dashboard</span></button>
+  <button data-go="machines"><svg class="ms" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/></svg><span data-t="nav.machines"></span></button>
+  <button data-go="trials"><svg class="ms" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3"/></svg><span data-t="nav.trials"></span></button>
+</nav>
 
-    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+<div class="scrim" id="scrim" data-act="close"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-label="รายละเอียดเครื่อง"></aside>
+<div class="modal" id="modal"><div class="mbox" id="mbox"></div></div>
+<div class="toast" id="toast" role="status"></div>
 
-    <!-- Sidebar: brand, nav (desktop), language, stats overview, admin/refresh -->
-    <div class="sidebar" id="sidebar">
-        <div class="brand-container">
-            <img src="img/logo.png" alt="C2TECH" class="brand-logo-img">
-            <h1 class="brand-text">Panolyzer<br>Management</h1>
-            <div class="brand-sub"></div>
-            <div class="brand-tag">BY C2TECH</div>
-        </div>
-
-        <div class="lang-container">
-            <button class="lang-btn" id="btn-th" onclick="setLanguage('th')">TH</button>
-            <button class="lang-btn" id="btn-en" onclick="setLanguage('en')">EN</button>
-        </div>
-
-        <ul class="sidebar-menu">
-            <li class="sidebar-menu-item" onclick="switchView('all')">
-                <i class="fas fa-server"></i> <span data-i18n="all">เครื่องทั้งหมด</span>
-            </li>
-            <li class="sidebar-menu-item tone-danger" onclick="switchView('rejected')">
-                <i class="fas fa-history"></i> <span data-i18n="rejected">ประวัติทดลอง</span>
-            </li>
-            <li class="sidebar-menu-item tone-info" onclick="showDashboard()">
-                <i class="fas fa-chart-pie"></i> <span>Dashboard</span>
-            </li>
-        </ul>
-
-        <div class="nav-label" id="nav-label-ov"><i class="fas fa-chart-pie"></i> ภาพรวมระบบ</div>
-        <div class="stats-grid" id="statsBox"></div>
-
-        <div class="sidebar-footer">
-            <div id="updateTime" class="sync-time"></div>
-            <button onclick="adminAuth()" class="btn-block">
-                <i class="fas fa-lock admin-login-btn"></i> <span id="adminBtnText">Admin Login</span>
-            </button>
-            <button onclick="fetchData()" id="refresh-btn" class="btn-block primary">
-                <i class="fas fa-sync-alt"></i> รีเฟรชข้อมูล
-            </button>
-        </div>
-    </div>
-
-    <!-- Main content -->
-    <div class="main-content">
-        <div class="page-header">
-            <h2 id="main-title">เครื่องทั้งหมด</h2>
-            <div id="totalCounter" class="total-counter"></div>
-        </div>
-
-        <div class="controls-card">
-            <div class="search-row">
-                <input type="text" id="searchInput" onkeyup="renderTable()" placeholder="ค้นหา S/N, ลูกค้า, โหมด...">
-                <select id="clientFilter" onchange="renderTable()">
-                    <option value="all">-- ลูกค้าทั้งหมด --</option>
-                </select>
-                <select id="modeFilter" onchange="renderTable()">
-                    <option value="all">-- Select Mode --</option>
-                    <option value="Milled rice">Milled rice</option>
-                    <option value="Paddy">Paddy</option>
-                </select>
-                <select id="resultFilter" onchange="renderTable()" style="display:none;"></select>
-            </div>
-            <div class="controls-footer">
-                <button onclick="resetFilters()" id="reset-btn" class="reset-link">
-                    <i class="fas fa-undo"></i> <span id="text-reset">ล้างค่าการค้นหา</span>
-                </button>
-            </div>
-        </div>
-
-        <div class="table-container">
-            <div class="table-scroll">
-                <table>
-                    <thead id="tableHead">
-                        <tr></tr>
-                    </thead>
-                    <tbody id="tableBody"></tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <script src="script.js"></script>
+<div class="ld" id="ld" role="status" aria-live="polite">
+  <div class="lens"><div class="ring"></div><div class="orb"><i></i><i></i><i></i></div><div class="grains"><b></b><b></b><b></b></div>
+    <div class="disc"><img id="ldImg" src="img/logo-512.webp" alt="Panolyzer" width="188" height="188"><div class="beam"></div></div></div>
+  <div class="lt"><b>Panolyzer Management</b><small>by C2TECH</small></div>
+  <div class="bar"><i></i></div>
+  <div class="step" id="ldStep">กำลังเชื่อมต่อ…</div>
+  <button class="btn pri" id="ldErr" data-act="retry" hidden>ลองใหม่</button>
+</div>
+<script src="script.js?v=20261101a"></script>
 </body>
-
 </html>
