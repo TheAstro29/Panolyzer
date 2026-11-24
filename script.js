@@ -4,6 +4,8 @@ const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const scriptURL = "https://script.google.com/macros/s/AKfycbzVzNPx9iTSbJwdaYH3YSNRuyaMgXel40oWfDlzY8KlMLXG2X5-1X63A9QBgF8JDD-z/exec";
 const CACHE_KEY = "c2tech_machines_data_v3", SYNC_KEY = "last_sync_time", LANG_KEY = "c2_lang", THEME_KEY = "c2_theme";
+// เข้าสู่ระบบ (24 พ.ย. 69): เก็บแค่ token จากหลังบ้าน (ไม่เก็บรหัสผ่าน) · admin 12 ชม. / guest 30 วัน
+const AUTH_KEY = "pano_auth_v1";
 const pad=n=>String(n).padStart(2,'0');
 const ymdOf=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 // วันที่จากชีต: Apps Script ส่งเป็นเวลาสากล (เช่น 2026-09-30T17:00:00Z = 1 ต.ค. เวลาไทย) → ใช้วันที่ตามเวลาเครื่อง
@@ -15,10 +17,10 @@ const days=(a,b)=>a?Math.max(0,Math.round((D(b||TODAY)-D(a))/864e5)):0;
 const addD=(s,n)=>{const d=D(s);d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)};
 
 /* ---------- i18n (UI) ---------- */
-const T={th:{'nav.machines':'เครื่องทั้งหมด','nav.trials':'การทดลอง',refresh:'รีเฟรชข้อมูล',admin:'เข้าสู่ระบบ Admin',adminOut:'ออกจาก Admin',search:'ค้นหา S/N, ลูกค้า, สถานที่…',allClients:'ลูกค้าทั้งหมด',allModes:'ทุกโหมด',allTypes:'ทุกประเภท',clear:'ล้างตัวกรอง',units:'เครื่อง',days:'วัน',updated:'อัปเดต',
+const T={th:{'nav.machines':'เครื่องทั้งหมด','nav.trials':'การทดลอง',refresh:'รีเฟรชข้อมูล',admin:'เข้าสู่ระบบ Admin',adminOut:'ออกจากระบบ',search:'ค้นหา S/N, ลูกค้า, สถานที่…',allClients:'ลูกค้าทั้งหมด',allModes:'ทุกโหมด',allTypes:'ทุกประเภท',clear:'ล้างตัวกรอง',units:'เครื่อง',days:'วัน',updated:'อัปเดต',
  st:{all:'ทั้งหมด',Stock:'ในคลัง',Test:'กำลังทดลอง',Complete:'ขายแล้ว',Broken:'ส่งซ่อม'},res:{Swapped:'ซื้อ · รับเครื่องใหม่',Bought:'ซื้อ',"Not Bought":'ไม่ซื้อ',Pending:'รอพิจารณา'},
  cols:['S/N Analyzer','Model','ลูกค้า / สถานที่','Mode','ประเภท','สถานะ','ส่งมอบ','ใช้งานมา']},
-en:{'nav.machines':'All Machines','nav.trials':'Trials',refresh:'Refresh data',admin:'Admin login',adminOut:'Leave Admin',search:'Search S/N, client, location…',allClients:'All clients',allModes:'All modes',allTypes:'All types',clear:'Clear filters',units:'units',days:'days',updated:'Updated',
+en:{'nav.machines':'All Machines','nav.trials':'Trials',refresh:'Refresh data',admin:'Admin login',adminOut:'Log out',search:'Search S/N, client, location…',allClients:'All clients',allModes:'All modes',allTypes:'All types',clear:'Clear filters',units:'units',days:'days',updated:'Updated',
  st:{all:'All',Stock:'In stock',Test:'On trial',Complete:'Sold',Broken:'In repair'},res:{Swapped:'Bought · new unit',Bought:'Bought',"Not Bought":'Not bought',Pending:'Pending'},
  cols:['S/N Analyzer','Model','Client / Location','Mode','Type','Status','Delivered','In use']}};
 let L=T.th;
@@ -40,7 +42,7 @@ function ingest(data){
   S.hist=(Array.isArray(data)?[]:(data.histories||[])).filter(h=>String(h["S/N Analyzer"]||'').trim()).map(h=>({id:String(h["ID"]),sn:String(h["S/N Analyzer"]).trim(),client:h["Client Name"]||'',loc:h["Location"]||'',
     start:ymd(h["Start Date"]),end:ymd(h["End Date"]),status:String(h["Status"]||'').trim()==='Completed'?'Completed':'In Progress',result:normResult(h["Result"]),remark:h["Remark"]||'',mode:h["Mode"]||'',swapRef:String(h["Swap_Ref"]||'').trim()}));
 }
-let UI={pw:'',busy:false,syncing:false,err:null,view:'dash',stF:'all',typeF:'all',modeF:'all',clientF:'all',q:'',sort:['use',-1],trTab:'open',resF:'all',open:null,form:null,admin:false,lang:'th',synced:''};
+let UI={auth:null,gRole:'admin',busy:false,syncing:false,err:null,view:'dash',stF:'all',typeF:'all',modeF:'all',clientF:'all',q:'',sort:['use',-1],trTab:'open',resF:'all',open:null,form:null,admin:false,lang:'th',synced:''};
 // การสลับเครื่อง: รายการ "Swapped" บนเครื่อง demo ↔ รายการ "ซื้อ" บนเครื่องใหม่ (ผูกด้วย Swap_Ref)
 const isBought=h=>h.result==='Bought'||h.result==='Swapped';
 const isReceiver=h=>!!h.swapRef&&h.result!=='Swapped'&&S.hist.some(x=>x.id===h.swapRef&&x.result==='Swapped'); // รายการรับเครื่องใหม่ ไม่นับเป็นการทดลอง
@@ -173,7 +175,7 @@ function drawer(){
       ${ot&&!ot.swapRef?`<button class="btn swapbtn" data-act="swap" data-v="${esc(ot.id)}">🔁 ${th?'ลูกค้าซื้อ · ขอเครื่องใหม่':'Bought · wants a new unit'}</button>`:''}</div>`;
   }
   if(UI.form) body+=formHtml(m,hs,ot);
-  if(!UI.admin) body+=`<div class="lock"><svg class="ms" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>${th?'ดูอย่างเดียว · แก้ไขได้เมื่อเข้าสู่ระบบ Admin':'View only · log in as Admin to edit'}<button class="btn sm" data-act="admin">${th?'เข้าสู่ระบบ':'Log in'}</button></div>`;
+  if(!UI.admin) body+=`<div class="lock"><svg class="ms" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>${th?'Guest ดูอย่างเดียว · แก้ไขได้เมื่อเข้าสู่ระบบ Admin':'Guest is view only · log in as Admin to edit'}<button class="btn sm" data-act="toAdmin">${L.admin}</button></div>`;
   body+=`<div class="card"><h3>${th?'ข้อมูลเครื่อง':'Machine info'}</h3><dl class="kv">
     <div><dt>${th?'ลูกค้าปัจจุบัน':'Current client'}</dt><dd>${esc(m.client)||'–'}</dd></div><div><dt>${th?'สถานที่':'Location'}</dt><dd>${esc(m.loc)||'–'}</dd></div>
     <div><dt>Model</dt><dd>${esc(m.model)}</dd></div><div><dt>Mode</dt><dd>${esc(m.mode)}</dd></div>
@@ -309,12 +311,15 @@ function render(keep){
   $$('[data-go]').forEach(b=>b.classList.toggle('on',b.dataset.go===UI.view));
   $$('[data-t]').forEach(e=>e.textContent=L[e.dataset.t]);
   $('#ctM').textContent=S.machines.length; $('#ctT').textContent=S.hist.filter(h=>h.status==='In Progress').length||'';
-  $('#adminR').innerHTML=UI.admin?`🔓 ${L.adminOut}`:`🔒 ${L.admin}`; $('#adminR').classList.toggle('on',UI.admin);
-  $('#adminM').textContent=UI.admin?'🔓':'🔒'; $('#adminM').classList.toggle('on',UI.admin);
+  const role=UI.auth?UI.auth.role:'';
+  $('#adminR').innerHTML=role?`${role==='admin'?'🔓 Admin':'👁 Guest'} · ${L.adminOut}`:''; $('#adminR').classList.toggle('on',UI.admin);
+  $('#adminM').textContent=role==='admin'?'🔓':role?'👁':''; $('#adminM').classList.toggle('on',UI.admin);
   $('#langM').textContent=UI.lang==='th'?'EN':'TH';
   $$('[data-lang]').forEach(b=>b.classList.toggle('on',b.dataset.lang===UI.lang));
   renderSync();
-  const ab=$('#adminbar'); ab.hidden=!UI.admin; ab.innerHTML=UI.admin?`<b>${L===T.th?'โหมด Admin':'Admin mode'}</b> · ${L===T.th?'แก้ไข เพิ่ม ลบข้อมูลได้':'you can edit data'} <button data-act="admin">${L.adminOut}</button>`:'';
+  const ab=$('#adminbar'),th=L===T.th; ab.hidden=!role; ab.classList.toggle('guest',role==='guest');
+  ab.innerHTML=role==='admin'?`<b>${th?'โหมด Admin':'Admin mode'}</b> · ${th?'แก้ไข เพิ่ม ลบข้อมูลได้':'you can edit data'} <button data-act="logout">${L.adminOut}</button>`
+    :role?`<b>${th?'โหมด Guest':'Guest mode'}</b> · ${th?'ดูอย่างเดียว แก้ไขไม่ได้':'view only'} <button data-act="toAdmin">${L.admin}</button>`:'';
   if(UI.open) drawer();
   const sc1=$('#sc'); if(keep&&sc1) sc1.scrollTop=y;
 }
@@ -327,6 +332,7 @@ const val=id=>{const e=document.getElementById(id);return e?e.value.trim():''};
 
 /* ---------- events ---------- */
 document.addEventListener('click',e=>{
+  const rl=e.target.closest('[data-role]'); if(rl){pickRole(rl.dataset.role,true);return}
   const go=e.target.closest('[data-go]'); if(go){UI.view=go.dataset.go;closeDrawer();render();return}
   const st=e.target.closest('[data-stat]'); if(st){const k=st.dataset.stat;UI.stF=k;UI.statKey=k;render(true);return}
   const c=e.target.closest('[data-st]'); if(c){UI.stF=c.dataset.st;UI.statKey=null;render(true);return}
@@ -342,7 +348,10 @@ document.addEventListener('click',e=>{
 });
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){if($('#modal').classList.contains('on'))closeModal();else closeDrawer()}
   if(e.key==='Enter'&&e.target.closest('.tcard')&&!e.target.closest('button'))openDrawer(e.target.closest('.tcard').dataset.open)});
+// หน้าเข้าสู่ระบบเป็น <form> → กด Enter ในช่องรหัสผ่านก็ส่งได้เลย
+document.addEventListener('submit',e=>{if(e.target.id==='gForm'){e.preventDefault();gateLogin()}});
 document.addEventListener('input',e=>{const t=e.target;
+  if(t.id==='gUser'){const u=t.value.trim().toLowerCase();if(u==='admin'||u==='guest')pickRole(u,false)}
   if(t.id==='q'){UI.q=t.value;clearTimeout(UI.qt);UI.qt=setTimeout(()=>{render(true);const q=$('#q');q.focus();q.setSelectionRange(q.value.length,q.value.length)},180)}
   if(t.id==='q2'){UI.q2=t.value;clearTimeout(UI.qt);UI.qt=setTimeout(()=>{render(true);const q=$('#q2');q.focus();q.setSelectionRange(q.value.length,q.value.length)},180)}});
 document.addEventListener('change',e=>{const t=e.target;
@@ -352,7 +361,7 @@ document.addEventListener('change',e=>{const t=e.target;
   if(t.id==='del-sync'){updDelEffect()}
   if(t.closest&&t.closest('#drawer .form'))updEffect()});
 document.addEventListener('input',e=>{if(e.target.id==='ff-sync'&&UI.form)UI.form.syncTouched=true;if(e.target.closest&&e.target.closest('#drawer .form'))updEffect()});
-function setLang(l){UI.lang=l;L=T[l];try{localStorage.setItem(LANG_KEY,l)}catch(e){}render(true);toast(l==='th'?'เปลี่ยนเป็นภาษาไทย':'Switched to English')}
+function setLang(l){UI.lang=l;L=T[l];try{localStorage.setItem(LANG_KEY,l)}catch(e){}render(true);if(!$('#gate').hidden)showGate();toast(l==='th'?'เปลี่ยนเป็นภาษาไทย':'Switched to English')}
 function act(a,v,e){
   UI.lastBtn=e&&e.target&&e.target.closest?e.target.closest('[data-act]'):null;
   const th=L===T.th;
@@ -360,10 +369,11 @@ function act(a,v,e){
   if(a==='lang'){setLang(UI.lang==='th'?'en':'th');return}
   if(a==='clearF'){Object.assign(UI,{q:'',stF:'all',typeF:'all',modeF:'all',clientF:'all',statKey:null});render(true);return}
   if(a==='refresh'){if(!UI.syncing)load().then(ok=>toast(ok?(th?'ข้อมูลล่าสุดแล้ว':'Data updated'):(th?'เชื่อมต่อไม่ได้':'Connection failed')));return}
-  if(a==='admin'){ if(UI.admin){UI.admin=false;UI.pw='';UI.form=null;render(true);toast(th?'ออกจากโหมด Admin แล้ว':'Left Admin mode');return}
-    modal(`<h3>${th?'เข้าสู่ระบบ Admin':'Admin login'}</h3><p>${th?'ใส่รหัสผ่านเพื่อเพิ่ม แก้ไข หรือลบข้อมูล':'Enter the password to add, edit or delete data'}</p><div class="f"><label for="pw">${th?'รหัสผ่าน':'Password'}</label><input type="password" id="pw" autocomplete="current-password"></div><div class="hint" id="pwErr" style="color:var(--broken)"></div><div class="fa"><button class="btn" data-act="mclose">${th?'ยกเลิก':'Cancel'}</button><button class="btn pri" data-act="login" id="loginBtn">${th?'เข้าสู่ระบบ':'Log in'}</button></div>`);return}
+  if(a==='logout'){if(!UI.auth)return;const r=UI.auth.role==='admin'?'Admin':'Guest';
+    modal(`<h3>${th?'ออกจากระบบ?':'Log out?'}</h3><p>${th?`บัญชี ${r} · ต้องเข้าสู่ระบบใหม่จึงจะดูข้อมูลได้`:`${r} account · you will need to log in again to view data`}</p><div class="fa"><button class="btn" data-act="mclose">${th?'ยกเลิก':'Cancel'}</button><button class="btn pri" data-act="logoutOk">${L.adminOut}</button></div>`);return}
+  if(a==='logoutOk'){logout('',UI.auth&&UI.auth.role);toast(th?'ออกจากระบบแล้ว':'Logged out');return}
+  if(a==='toAdmin'){logout('','admin');return}
   if(a==='mclose'){closeModal();return}
-  if(a==='login'){login();return}
   if(a==='retry'){boot(true);return}
   const m=UI.open&&M(UI.open);
   if(a==='startTrial'){if(UI.open!==v)openDrawer(v);UI.form={kind:'start'};drawer();$('#drawer .db').scrollTop=0;return}
@@ -400,17 +410,48 @@ function updDelEffect(){const box=$('#del-eff');if(!box||!UI.del)return;const ck
 const histPayload=x=>({ID:x.id,"S/N Analyzer":x.sn,"Client Name":x.client,"Location":x.loc,"Start Date":x.start,"End Date":x.end||'',"Status":x.status,"Result":x.result,"Remark":x.remark||'',"Mode":x.mode,syncMachineStatus:true});
 
 /* ---------- เชื่อมต่อ Apps Script ---------- */
-async function api(action,data,pw){
-  const r=await fetch(scriptURL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action,data,adminPassword:pw})});
+async function post(body){
+  const r=await fetch(scriptURL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body)});
   return r.json();
 }
-async function login(){const th=L===T.th,pw=val('pw'),btn=$('#loginBtn'),err=$('#pwErr');
-  if(!pw){err.textContent=th?'กรุณากรอกรหัสผ่าน':'Enter password';return}
-  btn.disabled=true;btn.textContent=th?'กำลังตรวจสอบ…':'Checking…';
-  try{const j=await api('verify_admin',null,pw);
-    if(j.status!=='success'){err.textContent=j.message||(th?'รหัสผ่านไม่ถูกต้อง':'Wrong password');btn.disabled=false;btn.textContent=th?'เข้าสู่ระบบ':'Log in';return}
-    UI.pw=pw;UI.admin=true;closeModal();render(true);toast(th?'เข้าสู่โหมด Admin แล้ว':'Admin mode on');
-  }catch(e){err.textContent=th?'เชื่อมต่อไม่ได้ ลองใหม่อีกครั้ง':'Connection failed';btn.disabled=false;btn.textContent=th?'เข้าสู่ระบบ':'Log in'}}
+const api=(action,data)=>post({action,data,token:UI.auth&&UI.auth.token});
+
+/* ---------- เข้าสู่ระบบ: admin (แก้ไขได้) / guest (ดูอย่างเดียว) — หลังบ้านตรวจ token ทุกคำสั่ง ---------- */
+function getAuth(){try{const a=JSON.parse(localStorage.getItem(AUTH_KEY)||'null');if(a&&a.token&&(a.role==='admin'||a.role==='guest')&&a.exp>Date.now())return a}catch(e){}return null}
+function setAuth(a){UI.auth=a;UI.admin=!!(a&&a.role==='admin');try{a?localStorage.setItem(AUTH_KEY,JSON.stringify(a)):localStorage.removeItem(AUTH_KEY)}catch(e){}}
+function showGate(role,msg){const th=L===T.th,g=$('#gate');if(role)UI.gRole=role;const R=UI.gRole;
+  g.innerHTML=`<form class="gbox" id="gForm" novalidate>
+    <img class="glogo" src="img/logo-512.webp" alt="" width="76" height="76">
+    <div class="gt"><b>Panolyzer Management</b><small>by C2TECH</small></div>
+    <p class="gsub">${th?'กรุณาเข้าสู่ระบบเพื่อดูข้อมูล':'Please log in to view data'}</p>
+    <div class="seg grole" role="group" aria-label="${th?'ประเภทบัญชี':'Account type'}">
+      <button type="button" data-role="admin" class="${R==='admin'?'on':''}" aria-pressed="${R==='admin'}"><b>Admin</b><small>${th?'ดู + แก้ไขข้อมูล':'View + edit'}</small></button>
+      <button type="button" data-role="guest" class="${R==='guest'?'on':''}" aria-pressed="${R==='guest'}"><b>Guest</b><small>${th?'ดูอย่างเดียว':'View only'}</small></button></div>
+    <div class="f"><label for="gUser">${th?'ชื่อผู้ใช้':'Username'}</label><input id="gUser" name="username" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" value="${R}"></div>
+    <div class="f"><label for="gPw">${th?'รหัสผ่าน':'Password'}</label><input id="gPw" name="password" type="password" autocomplete="current-password" enterkeyhint="go"></div>
+    <div class="hint gerr" id="gErr" role="alert">${esc(msg||'')}</div>
+    <button class="btn pri block" type="submit" id="gBtn">${th?'เข้าสู่ระบบ':'Log in'}</button>
+    <div class="gfoot"><div class="seg"><button type="button" data-lang="th" class="${UI.lang==='th'?'on':''}">TH</button><button type="button" data-lang="en" class="${UI.lang==='en'?'on':''}">EN</button></div></div>
+  </form>`;
+  g.hidden=false;document.body.classList.add('gated');setTimeout(()=>{const p=$('#gPw');if(p)p.focus()},60)}
+function hideGate(){const g=$('#gate');g.hidden=true;g.innerHTML='';document.body.classList.remove('gated')}
+function pickRole(r,focus){UI.gRole=r;$$('[data-role]').forEach(b=>{const on=b.dataset.role===r;b.classList.toggle('on',on);b.setAttribute('aria-pressed',on)});
+  const u=$('#gUser');if(u&&u.value.trim().toLowerCase()!==r)u.value=r;const e=$('#gErr');if(e)e.textContent='';if(focus){const p=$('#gPw');if(p)p.focus()}}
+async function gateLogin(){const th=L===T.th,u=val('gUser').toLowerCase(),pwEl=$('#gPw'),pw=pwEl?pwEl.value:'',btn=$('#gBtn'),err=$('#gErr');
+  if(!btn||btn.disabled)return;
+  if(u!=='admin'&&u!=='guest'){err.textContent=th?'ชื่อผู้ใช้ต้องเป็น admin หรือ guest':'Username must be admin or guest';$('#gUser').focus();return}
+  if(!pw){err.textContent=th?'กรุณากรอกรหัสผ่าน':'Enter password';pwEl.focus();return}
+  const reset=()=>{btn.disabled=false;btn.textContent=th?'เข้าสู่ระบบ':'Log in'};
+  btn.disabled=true;btn.textContent=th?'กำลังตรวจสอบ…':'Checking…';err.textContent='';
+  try{const j=await post({action:'pano_login',username:u,password:pw});
+    if(j.status!=='success'||!j.token){err.textContent=j.message||(th?'รหัสผ่านไม่ถูกต้อง':'Wrong password');reset();pwEl.select();return}
+    setAuth({token:j.token,role:j.role,exp:Number(j.expiresAt)||Date.now()+36e5});
+    hideGate();render();boot(true);toast(j.role==='admin'?(th?'เข้าสู่ระบบ Admin แล้ว':'Logged in as Admin'):(th?'เข้าสู่ระบบ Guest แล้ว · ดูอย่างเดียว':'Logged in as Guest · view only'));
+  }catch(e){err.textContent=th?'เชื่อมต่อไม่ได้ ลองใหม่อีกครั้ง':'Connection failed';reset()}}
+// ออกจากระบบ / token หมดอายุ: ล้างข้อมูลในเครื่องทั้งหมด แล้วกลับหน้าเข้าสู่ระบบ
+function logout(msg,role){setAuth(null);S.machines=[];S.hist=[];UI.synced='';UI.err=null;UI.form=null;UI.del=null;
+  try{localStorage.removeItem(CACHE_KEY);localStorage.removeItem(SYNC_KEY)}catch(e){}
+  closeModal();closeDrawer();render();$('#ld').classList.add('out');showGate(role,msg)}
 // ระหว่างบันทึก: ปุ่มที่กดหมุน + ขึ้นข้อความ · แผงด้านขวากดซ้ำไม่ได้ · แถบ "กำลังบันทึก…" ด้านบนจอ (เห็นทั้งคอมและมือถือ)
 function setBusy(b,label){UI.busy=b;$('#drawer').classList.toggle('busy',b);
   const bar=$('#busy');bar.querySelector('span').textContent=label||(L===T.th?'กำลังบันทึก…':'Saving…');bar.classList.toggle('on',b);
@@ -420,9 +461,10 @@ function setBusy(b,label){UI.busy=b;$('#drawer').classList.toggle('busy',b);
   renderSync()}
 async function save(action,data,okMsg){const th=L===T.th;if(UI.busy)return;
   setBusy(true);
-  try{const j=await api(action,data,UI.pw);
+  try{const j=await api(action,data);
     if(j.status!=='success'){const msg=j.message||(th?'บันทึกไม่สำเร็จ':'Save failed');
-      if(/รหัสผ่าน|ล็อก|Admin/.test(msg)){UI.admin=false;UI.pw='';UI.form=null}
+      if(j.code==='AUTH'){setBusy(false);logout(msg,'admin');return}
+      if(j.code==='FORBIDDEN')UI.form=null;
       setBusy(false);render(true);modal(`<h3>${th?'บันทึกไม่สำเร็จ':'Save failed'}</h3><p>${esc(msg)}</p><div class="fa"><button class="btn pri" data-act="mclose">${th?'ตกลง':'OK'}</button></div>`);return}
     UI.form=null;$('#busy span').textContent=th?'บันทึกแล้ว · กำลังอัปเดตข้อมูล…':'Saved · refreshing…';await load();setBusy(false);toast(j.message||okMsg);
   }catch(e){setBusy(false);modal(`<h3>${th?'เชื่อมต่อไม่ได้':'Connection failed'}</h3><p>${th?'ยังไม่ได้บันทึก กรุณาลองใหม่อีกครั้ง':'Nothing was saved. Please try again.'}</p><div class="fa"><button class="btn pri" data-act="mclose">${th?'ตกลง':'OK'}</button></div>`)}}
@@ -431,8 +473,9 @@ function renderSync(){const th=L===T.th;
   const html=t?`<span class="syncpill"><span class="dot"></span>${t}</span>`:UI.err?`<span style="color:var(--broken)">${esc(UI.err)}</span>`:(UI.synced?`${L.updated} ${esc(UI.synced)}`:'');
   $('#sync').innerHTML=html;$('#syncR').innerHTML=html;
   $$('[data-act=refresh] svg').forEach(s=>s.classList.toggle('spin',UI.syncing))}
-async function load(){const th=L===T.th;UI.syncing=true;renderSync();
-  try{const r=await fetch(scriptURL+'?app=panolyzer&v='+Date.now(),{cache:'no-store',redirect:'follow'});const data=await r.json();
+async function load(){const th=L===T.th;if(!UI.auth)return false;UI.syncing=true;renderSync();
+  try{const data=await api('get_data');
+    if(data&&data.code==='AUTH'){UI.syncing=false;logout(data.message,UI.auth&&UI.auth.role);return false}
     if(!data||data.status==='error')throw new Error(data&&data.message||'error');
     ingest(data);TODAY=ymdOf(new Date());
     UI.synced=new Date().toLocaleString(th?'th-TH':'en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',hour12:false});UI.err=null;
@@ -448,12 +491,18 @@ async function boot(retry){
   let i=0;clearInterval(boot.t);boot.t=setInterval(()=>{if(i<2){i++;stepTo(steps[i])}},950);
   const minShow=new Promise(r=>setTimeout(r,retry?1200:2850));
   const [ok]=await Promise.all([load(),minShow]);clearInterval(boot.t);
+  if(!UI.auth){ld.classList.add('out');return} // token หมดอายุระหว่างโหลด → อยู่หน้าเข้าสู่ระบบ
   if(!ok&&!S.machines.length){stepTo(L===T.th?'เชื่อมต่อไม่ได้ ตรวจสอบอินเทอร์เน็ตแล้วลองใหม่':'Cannot connect. Check your connection and retry.');$('#ldErr').hidden=false;return}
   stepTo(steps[3]);setTimeout(()=>ld.classList.add('out'),700);
 }
 (function init(){
   try{const l=localStorage.getItem(LANG_KEY);if(l==='en'||l==='th'){UI.lang=l;L=T[l]}}catch(e){}
   try{const t=localStorage.getItem(THEME_KEY);if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}
+  const a=getAuth();
+  if(!a){ // ยังไม่ได้เข้าสู่ระบบ: ไม่แสดงข้อมูลใด ๆ (ล้างข้อมูลที่ค้างในเครื่องจากเวอร์ชันก่อน)
+    try{localStorage.removeItem(CACHE_KEY);localStorage.removeItem(SYNC_KEY);localStorage.removeItem(AUTH_KEY)}catch(e){}
+    render();$('#ld').classList.add('out');showGate();return}
+  setAuth(a);
   try{const c=JSON.parse(localStorage.getItem(CACHE_KEY)||'null');if(c){ingest(c);UI.synced=localStorage.getItem(SYNC_KEY)||''}}catch(e){}
   render();boot(false);
 })();

@@ -342,3 +342,29 @@ tbody tr:last-child td{border-bottom:0}
 .drawer.busy .db::before{content:"";position:sticky;top:0;display:block;height:3px;margin:-16px -18px 13px;background:linear-gradient(90deg,transparent,var(--brand),transparent);background-size:50% 100%;background-repeat:no-repeat;animation:busybar 1s linear infinite;z-index:2}
 @keyframes busybar{from{background-position:-50% 0}to{background-position:150% 0}}
 @media (prefers-reduced-motion: reduce){.spin-ic,.drawer.busy .db::before{animation:none}}
+
+/* ---------- หน้าเข้าสู่ระบบ (24 พ.ย. 69) — อยู่ใต้หน้า loading (z 100) แต่เหนือทุกอย่างของแอป ---------- */
+.gate{position:fixed;inset:0;z-index:90;display:flex;overflow-y:auto;padding:16px;padding-bottom:calc(16px + env(safe-area-inset-bottom));
+  background:radial-gradient(120% 90% at 50% 35%,#FFFFFF 0%,#EEF4F0 55%,#DCE8E0 100%)}
+.gate[hidden]{display:none}
+:root[data-theme="dark"] .gate{background:radial-gradient(120% 90% at 50% 35%,#22302A 0%,#151C18 70%)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .gate{background:radial-gradient(120% 90% at 50% 35%,#22302A 0%,#151C18 70%)}}
+body.gated{overflow:hidden}
+body.gated .bnav{display:none}
+.gbox{margin:auto;width:min(390px,100%);background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:24px 22px;box-shadow:0 20px 50px rgba(0,0,0,.12);display:flex;flex-direction:column;gap:12px}
+.glogo{width:76px;height:76px;border-radius:50%;align-self:center;object-fit:cover}
+.gt{text-align:center}
+.gt b{display:block;font-size:20px;font-weight:700;color:var(--brand-ink)}
+.gt small{display:block;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--brand2)}
+.gsub{margin:0;text-align:center;color:var(--sub);font-size:14px}
+.grole{display:flex;width:100%}
+.grole button{flex:1 1 0;display:flex;flex-direction:column;align-items:center;gap:0;padding:9px 8px;min-height:52px;font-size:14px;color:var(--sub)}
+.grole button b{font-weight:600;color:var(--ink);font-size:15px}
+.grole button small{font-size:12px}
+.grole button.on b,.grole button.on small{color:var(--on-brand)}
+.grole button+button{border-left:1px solid var(--line)}
+.gate .f input{height:46px;font-size:16px} /* 16px กัน iOS ซูมตอนแตะช่อง */
+.gerr{color:var(--broken);min-height:18px;font-size:13px}
+.gate .btn.pri{min-height:46px;font-size:15px}
+.gfoot{display:flex;justify-content:center}
+.adminbar.guest{background:var(--tint);color:var(--brand-ink)}
