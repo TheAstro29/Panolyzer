@@ -70,18 +70,21 @@ function vMachines(){
     ${stat('Complete',L.st.Complete,st('Complete').length,lr(st('Complete')),'--sold')}
     ${stat('Broken',L.st.Broken,st('Broken').length,lr(st('Broken')),'--broken')}</div>`;
   const clients=[...new Set(ms.map(m=>m.client).filter(Boolean))].sort();
-  h+=`<div class="filters"><div class="frow">
+  // มือถือ: ตัวกรอง (ลูกค้า/โหมด/ประเภท/สถานะ) พับไว้ใต้ปุ่ม "ตัวกรอง" — คอมแสดงตามเดิม (.fbtn / .fsum ซ่อน)
+  const th=L===T.th, act=[UI.stF!=='all'&&L.st[UI.stF],UI.typeF!=='all'&&UI.typeF,UI.modeF!=='all'&&UI.modeF,UI.clientF!=='all'&&UI.clientF].filter(Boolean);
+  h+=`<div class="filters ${UI.fOpen?'open':''}"><div class="frow">
       <label class="search"><svg class="ms" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--mute)"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" placeholder="${L.search}" value="${esc(UI.q)}" aria-label="ค้นหา"></label>
-      <select class="sel" id="fClient" aria-label="ลูกค้า"><option value="all">${L.allClients}</option>${clients.map(c=>`<option ${UI.clientF===c?'selected':''}>${esc(c)}</option>`).join('')}</select>
+      <button class="fbtn ${act.length?'has':''}" data-act="ftoggle" aria-expanded="${!!UI.fOpen}"><svg class="ms" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M7 12h10M10 18h4"/></svg>${th?'ตัวกรอง':'Filters'}${act.length?`<b class="num">${act.length}</b>`:''}<span class="chev">${UI.fOpen?'▴':'▾'}</span></button>
+      <span class="fm1"><select class="sel" id="fClient" aria-label="ลูกค้า"><option value="all">${L.allClients}</option>${clients.map(c=>`<option ${UI.clientF===c?'selected':''}>${esc(c)}</option>`).join('')}</select>
       <select class="sel" id="fMode" aria-label="โหมด"><option value="all">${L.allModes}</option>${['Milled rice','Paddy'].map(x=>`<option ${UI.modeF===x?'selected':''}>${x}</option>`).join('')}</select>
-      <div class="seg" role="group">${[['all',L.allTypes],['Lab','Lab'],['Real-time','Real-time']].map(([k,t])=>`<button class="${UI.typeF===k?'on':''}" data-type="${k}">${t}</button>`).join('')}</div>
-    </div><div class="frow"><div class="chips">${['all','Stock','Test','Complete','Broken'].map(k=>`<button class="chip ${UI.stF===k?'on':''}" data-st="${k}" style="--c:var(${k==='all'?'--brand':ST_C[k][0]})">${k==='all'?'':'<i></i>'}${L.st[k]} <b class="num">${k==='all'?ms.length:st(k).length}</b></button>`).join('')}</div>
+      <div class="seg" role="group">${[['all',L.allTypes],['Lab','Lab'],['Real-time','Real-time']].map(([k,t])=>`<button class="${UI.typeF===k?'on':''}" data-type="${k}">${t}</button>`).join('')}</div></span>
+    </div><div class="frow fm2"><div class="chips">${['all','Stock','Test','Complete','Broken'].map(k=>`<button class="chip ${UI.stF===k?'on':''}" data-st="${k}" style="--c:var(${k==='all'?'--brand':ST_C[k][0]})">${k==='all'?'':'<i></i>'}${L.st[k]} <b class="num">${k==='all'?ms.length:st(k).length}</b></button>`).join('')}</div>
       ${(UI.q||UI.stF!=='all'||UI.typeF!=='all'||UI.modeF!=='all'||UI.clientF!=='all')?`<button class="link" data-act="clearF">${L.clear}</button>`:''}</div></div>`;
   const q=UI.q.toLowerCase();
   let list=ms.filter(m=>(UI.stF==='all'||m.status===UI.stF)&&(UI.typeF==='all'||m.type===UI.typeF)&&(UI.modeF==='all'||m.mode===UI.modeF)&&(UI.clientF==='all'||m.client===UI.clientF)&&(!q||[m.sn,m.edge,m.gw,m.client,m.loc,m.model,m.mode].join(' ').toLowerCase().includes(q)));
   const [sk,sd]=UI.sort, key={sn:m=>m.sn,model:m=>m.model,client:m=>m.client||'~',status:m=>m.status,deliv:m=>m.deliv||'0',use:m=>useDays(m)}[sk];
   list.sort((a,b)=>{const A=key(a),B=key(b);return (A>B?1:A<B?-1:0)*sd});
-  h+=`<p class="count">${L===T.th?'แสดง':'Showing'} <b class="num">${list.length}</b> ${L.units} · ${L===T.th?'แตะที่เครื่องเพื่อดูรายละเอียดและประวัติ':'Tap a machine for details & history'}</p></div><div class="scroll" id="sc">`;
+  h+=`<p class="count">${th?'แสดง':'Showing'} <b class="num">${list.length}</b> ${L.units}<span class="hint2"> · ${th?'แตะที่เครื่องเพื่อดูรายละเอียดและประวัติ':'Tap a machine for details & history'}</span>${act.length?`<span class="fsum"> · ${th?'กรอง':'Filter'}: ${act.map(esc).join(', ')} <button class="link" data-act="clearF" aria-label="${L.clear}">✕ ${th?'ล้าง':'Clear'}</button></span>`:''}</p></div><div class="scroll" id="sc">`;
   if(!list.length) return h+`<div class="tw" style="display:block"><div class="empty">${L===T.th?'ไม่พบเครื่องที่ตรงกับตัวกรอง':'No machines match'}</div></div></div>`;
   const ar=k=>UI.sort[0]===k?`<span class="ar">${UI.sort[1]>0?'▲':'▼'}</span>`:'';
   const C=L.cols;
@@ -305,7 +308,8 @@ function formHtml(m,hs,ot){
 /* ---------- render ---------- */
 const TITLE=()=>({machines:L['nav.machines'],trials:L['nav.trials'],dash:'Dashboard'})[UI.view];
 function render(keep){
-  const sc0=$('#sc'), y=sc0?sc0.scrollTop:0;
+  const sc0=$('#sc'), y=sc0?sc0.scrollTop:0, pg=$('#page'), py=pg.scrollTop; // มือถือเลื่อนทั้ง #page
+
   $('#page').innerHTML=UI.view==='machines'?vMachines():UI.view==='trials'?vTrials():vDash();
   $('#ttl').textContent=$('#ttlM').textContent=TITLE();
   $$('[data-go]').forEach(b=>b.classList.toggle('on',b.dataset.go===UI.view));
@@ -313,7 +317,7 @@ function render(keep){
   $('#ctM').textContent=S.machines.length; $('#ctT').textContent=S.hist.filter(h=>h.status==='In Progress').length||'';
   const role=UI.auth?UI.auth.role:'';
   $('#adminR').innerHTML=role?`${role==='admin'?'🔓 Admin':'👁 Guest'} · ${L.adminOut}`:''; $('#adminR').classList.toggle('on',UI.admin);
-  $('#adminM').textContent=role==='admin'?'🔓':role?'👁':''; $('#adminM').classList.toggle('on',UI.admin);
+  $('#adminM').textContent=role==='admin'?'🔓':role?'👁':''; $('#adminM').title=role?(role==='admin'?'Admin':'Guest')+' · '+L.adminOut:''; $('#adminM').classList.toggle('on',UI.admin);
   $('#langM').textContent=UI.lang==='th'?'EN':'TH';
   $$('[data-lang]').forEach(b=>b.classList.toggle('on',b.dataset.lang===UI.lang));
   renderSync();
@@ -322,6 +326,7 @@ function render(keep){
     :role?`<b>${th?'โหมด Guest':'Guest mode'}</b> · ${th?'ดูอย่างเดียว แก้ไขไม่ได้':'view only'} <button data-act="toAdmin">${L.admin}</button>`:'';
   if(UI.open) drawer();
   const sc1=$('#sc'); if(keep&&sc1) sc1.scrollTop=y;
+  pg.scrollTop=keep?py:0;
 }
 function openDrawer(sn){UI.open=sn;UI.form=null;drawer();$('#drawer').classList.add('on');$('#scrim').classList.add('on')}
 function closeDrawer(){UI.open=null;UI.form=null;$('#drawer').classList.remove('on');$('#scrim').classList.remove('on')}
@@ -367,6 +372,7 @@ function act(a,v,e){
   const th=L===T.th;
   if(a==='close'){closeDrawer();return}
   if(a==='lang'){setLang(UI.lang==='th'?'en':'th');return}
+  if(a==='ftoggle'){UI.fOpen=!UI.fOpen;render(true);return}
   if(a==='clearF'){Object.assign(UI,{q:'',stF:'all',typeF:'all',modeF:'all',clientF:'all',statKey:null});render(true);return}
   if(a==='refresh'){if(!UI.syncing)load().then(ok=>toast(ok?(th?'ข้อมูลล่าสุดแล้ว':'Data updated'):(th?'เชื่อมต่อไม่ได้':'Connection failed')));return}
   if(a==='logout'){if(!UI.auth)return;const r=UI.auth.role==='admin'?'Admin':'Guest';
